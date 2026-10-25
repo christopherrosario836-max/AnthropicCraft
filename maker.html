@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blockland Texture Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: header bar; three columns (slot list, editor, preview). Stacks on narrow screens. */
+:root{--bg:#0b100d;--panel:#131c16;--panel2:#18241c;--edge:#2f4237;--ink:#eef3e8;--dim:#9db0a0;--lime:#a6d94f;--amber:#f2b94b;--red:#e0523f;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Pixelify Sans",ui-monospace,Menlo,Consolas,monospace;font-size:15px}
+body{min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:12px max(16px,env(safe-area-inset-left)) 12px max(16px,env(safe-area-inset-right));border-bottom:2px solid var(--edge);background:var(--panel)}
+h1{margin:0;font-size:24px;letter-spacing:2px;text-transform:uppercase;color:var(--lime);text-shadow:2px 2px 0 #000}
+h2{margin:0 0 6px;font-size:14px;letter-spacing:2px;text-transform:uppercase;color:var(--amber)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,.btn,select{font:600 14px "Pixelify Sans",ui-monospace,monospace;color:var(--ink);background:#2b3b2f;border:2px solid #000;box-shadow:inset 0 -3px 0 rgba(0,0,0,.35),inset 0 2px 0 rgba(255,255,255,.12);padding:7px 11px;cursor:pointer;text-transform:uppercase;letter-spacing:1px;text-decoration:none;display:inline-block}
+button:hover,.btn:hover{background:#38503d}
+button.on{background:#4d7a22}
+button.go{background:#4d7a22}
+button:focus-visible,input:focus-visible,.btn:focus-visible{outline:3px solid var(--amber);outline-offset:1px}
+main{flex:1;display:grid;grid-template-columns:260px minmax(0,1fr) 270px;gap:14px;padding:14px max(16px,env(safe-area-inset-left)) 24px max(16px,env(safe-area-inset-right))}
+section{background:var(--panel);border:2px solid var(--edge);padding:12px;min-width:0}
+#side{max-height:calc(100vh - 100px);overflow-y:auto;position:sticky;top:10px;align-self:start}
+.tabs{display:flex;gap:6px;margin-bottom:10px}.tabs button{flex:1}
+.cat{font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin:12px 0 4px}
+.slotbtn{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:4px 6px;margin:0 0 3px;background:var(--panel2);border:2px solid transparent;box-shadow:none;text-transform:none;letter-spacing:0;font-weight:400}
+.slotbtn.sel{border-color:var(--amber)}
+.slotbtn canvas{width:32px;height:32px;image-rendering:pixelated;background:repeating-conic-gradient(#222 0 25%,#333 0 50%) 0 0/8px 8px;flex:none}
+.slotbtn span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.slotbtn i{width:8px;height:8px;background:var(--lime);display:none;flex:none}
+.slotbtn.mod i{display:block}
+#stage{display:flex;flex-direction:column;gap:10px}
+#view{max-width:100%;overflow:auto;border:2px solid #000;background:#000;align-self:flex-start}
+#view canvas{display:block;image-rendering:pixelated;touch-action:none;cursor:crosshair}
+.swatches{display:flex;flex-wrap:wrap;gap:4px}
+.sw{width:24px;height:24px;border:2px solid #000;padding:0;box-shadow:none;background-clip:padding-box}
+.sw.sel{outline:2px solid var(--amber)}
+input[type=color]{width:42px;height:34px;padding:0;border:2px solid #000;background:none;cursor:pointer}
+input[type=range]{accent-color:var(--lime);width:110px}
+label.opt{display:inline-flex;gap:6px;align-items:center;cursor:pointer;color:var(--dim)}
+.pv{display:flex;flex-direction:column;gap:12px}
+.pv canvas{image-rendering:pixelated;background:repeating-conic-gradient(#222 0 25%,#333 0 50%) 0 0/8px 8px;border:2px solid #000;max-width:100%}
+.hint{color:var(--dim);font-size:13px;line-height:1.4;margin:0}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--panel2);border:2px solid var(--edge);padding:8px 14px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
+@media (max-width:980px){main{grid-template-columns:1fr}#side{position:static;max-height:260px}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Blockland Texture Lab</h1><p class="hint">Paint blocks, items and mob skins. Export a pack the game can load.</p></div>
+  <div class="row">
+    <button id="btnImport">Import</button>
+    <button id="btnExport" class="go">Export pack (.zip)</button>
+    <label class="opt"><input type="checkbox" id="optAll"> include unchanged</label>
+    <a class="btn" href="./">Open the game</a>
+  </div>
+  <input type="file" id="fileImport" accept="image/png,.zip" multiple hidden>
+  <input type="file" id="fileSlot" accept="image/png" hidden>
+</header>
+<main>
+  <section id="side">
+    <div class="tabs"><button id="tabBlocks" class="on">Blocks and items</button><button id="tabMobs">Mobs</button></div>
+    <div id="list"></div>
+  </section>
+  <section id="stage">
+    <div class="row" style="justify-content:space-between"><h2 id="slotTitle">Texture</h2><span class="hint" id="slotInfo"></span></div>
+    <div class="row" id="tools">
+      <button data-tool="pencil" class="on">Pencil</button><button data-tool="eraser">Eraser</button><button data-tool="fill">Fill</button><button data-tool="pick">Pick</button>
+      <label class="opt"><input type="checkbox" id="optMirror"> mirror</label>
+      <button id="btnUndo">Undo</button>
+    </div>
+    <div id="view"><canvas id="cv"></canvas></div>
+    <div class="row">
+      <input type="color" id="col" value="#7cbd4a" aria-label="Paint colour">
+      <label class="opt">alpha <input type="range" id="alpha" min="0" max="100" value="100"></label>
+      <div class="swatches" id="swatches"></div>
+    </div>
+    <div class="row">
+      <button id="btnFlipH">Flip H</button><button id="btnFlipV">Flip V</button>
+      <button id="btnL">&larr;</button><button id="btnR">&rarr;</button><button id="btnU">&uarr;</button><button id="btnD">&darr;</button>
+      <button id="btnClear">Clear</button><button id="btnReset">Reset slot</button>
+      <button id="btnLoadSlot">Load PNG</button><button id="btnSaveSlot">Save PNG</button>
+      <label class="opt" id="tintRow"><input type="checkbox" id="optTint" checked> show tint</label>
+      <label class="opt" id="guideRow" hidden><input type="checkbox" id="optGuide" checked> show layout guide</label>
+    </div>
+  </section>
+  <section class="pv">
+    <div><h2>Preview</h2><canvas id="pvOne" width="96" height="96"></canvas></div>
+    <div><h2>Tiled</h2><canvas id="pvTile" width="96" height="96"></canvas></div>
+    <div><h2>Block</h2><canvas id="pvCube" width="120" height="112"></canvas></div>
+    <div>
+      <h2>Biome colours</h2>
+      <div class="row"><label class="opt">Grass <input type="color" id="tGrass"></label><label class="opt">Leaves <input type="color" id="tFoliage"></label></div>
+      <p class="hint" style="margin-top:6px">Grass and leaf textures are drawn in grey. The game multiplies them by these colours, and these colours are saved in the exported pack.</p>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+/* ---------- noise ---------- */
+let SEED = 1;
+function hash2(x, z, s) {
+  let h = Math.imul(x, 374761393) + Math.imul(z, 668265263) + Math.imul(s, 1442695041) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function hash3(x, y, z, s) {
+  let h = Math.imul(x, 374761393) + Math.imul(y, 1103515245) + Math.imul(z, 668265263) + Math.imul(s, 1442695041) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function vnoise(x, z, s) {
+  const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = zf * zf * (3 - 2 * zf);
+  const a = hash2(xi, zi, s), b = hash2(xi + 1, zi, s), c = hash2(xi, zi + 1, s), d = hash2(xi + 1, zi + 1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function vnoise3(x, y, z, s) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const xf = x - xi, yf = y - yi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
+  const l = (a, b, t) => a + (b - a) * t;
+  const c00 = l(hash3(xi, yi, zi, s), hash3(xi + 1, yi, zi, s), u), c10 = l(hash3(xi, yi + 1, zi, s), hash3(xi + 1, yi + 1, zi, s), u);
+  const c01 = l(hash3(xi, yi, zi + 1, s), hash3(xi + 1, yi, zi + 1, s), u), c11 = l(hash3(xi, yi + 1, zi + 1, s), hash3(xi + 1, yi + 1, zi + 1, s), u);
+  return l(l(c00, c10, v), l(c01, c11, v), w);
+}
+function fbm2(x, z, oct) {
+  let a = 1, f = 1, sum = 0, n = 0;
+  for (let i = 0; i < oct; i++) { sum += a * vnoise(x * f, z * f, SEED + i * 101); n += a; a *= 0.5; f *= 2; }
+  return sum / n;
+}
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+
+/* ===== Shared manifest: the single source of truth for texture slots and mob skins.
+   The game and the Texture Lab are both built from this file, so adding a slot here
+   adds it to both. t = tile index in the 16x16-tile atlas. tint = biome colour layer. ===== */
+const TILES = [
+  { t: 0, name: 'grass_top', label: 'Grass top', cat: 'Blocks', tint: 'grass' },
+  { t: 1, name: 'grass_side', label: 'Grass side (dirt part)', cat: 'Blocks' },
+  { t: 25, name: 'grass_side_overlay', label: 'Grass side overlay', cat: 'Blocks', tint: 'grass' },
+  { t: 2, name: 'dirt', label: 'Dirt', cat: 'Blocks' },
+  { t: 3, name: 'stone', label: 'Stone', cat: 'Blocks' },
+  { t: 4, name: 'sand', label: 'Sand', cat: 'Blocks' },
+  { t: 5, name: 'log_oak', label: 'Log side', cat: 'Blocks' },
+  { t: 6, name: 'log_oak_top', label: 'Log top', cat: 'Blocks' },
+  { t: 7, name: 'leaves_oak', label: 'Leaves', cat: 'Blocks', tint: 'foliage' },
+  { t: 8, name: 'planks_oak', label: 'Planks', cat: 'Blocks' },
+  { t: 9, name: 'cobblestone', label: 'Cobblestone', cat: 'Blocks' },
+  { t: 10, name: 'water_still', label: 'Water', cat: 'Blocks' },
+  { t: 11, name: 'coal_ore', label: 'Coal ore', cat: 'Blocks' },
+  { t: 12, name: 'bedrock', label: 'Bedrock', cat: 'Blocks' },
+  { t: 13, name: 'glass', label: 'Glass', cat: 'Blocks' },
+  { t: 15, name: 'iron_ore', label: 'Iron ore', cat: 'Blocks' },
+  { t: 16, name: 'crafting_table_top', label: 'Crafting table top', cat: 'Blocks' },
+  { t: 17, name: 'crafting_table_side', label: 'Crafting table side', cat: 'Blocks' },
+  { t: 19, name: 'furnace_front_off', label: 'Furnace front', cat: 'Blocks' },
+  { t: 20, name: 'furnace_top', label: 'Furnace top', cat: 'Blocks' },
+  { t: 21, name: 'anvil_base', label: 'Anvil', cat: 'Blocks' },
+  { t: 14, name: 'beef_raw', alias: ['porkchop_raw', 'mutton_raw'], label: 'Raw meat', cat: 'Items' },
+  { t: 22, name: 'stick', label: 'Stick', cat: 'Items' },
+  { t: 23, name: 'coal', label: 'Coal', cat: 'Items' },
+  { t: 24, name: 'iron_ingot', label: 'Iron ingot', cat: 'Items' },
+  { t: 28, name: 'wood_pickaxe', label: 'Wooden pickaxe', cat: 'Tools' }, { t: 29, name: 'stone_pickaxe', label: 'Stone pickaxe', cat: 'Tools' }, { t: 30, name: 'iron_pickaxe', label: 'Iron pickaxe', cat: 'Tools' },
+  { t: 31, name: 'wood_axe', label: 'Wooden axe', cat: 'Tools' }, { t: 32, name: 'stone_axe', label: 'Stone axe', cat: 'Tools' }, { t: 33, name: 'iron_axe', label: 'Iron axe', cat: 'Tools' },
+  { t: 34, name: 'wood_sword', label: 'Wooden sword', cat: 'Tools' }, { t: 35, name: 'stone_sword', label: 'Stone sword', cat: 'Tools' }, { t: 36, name: 'iron_sword', label: 'Iron sword', cat: 'Tools' },
+  { t: 37, name: 'wood_shovel', label: 'Wooden shovel', cat: 'Tools' }, { t: 38, name: 'stone_shovel', label: 'Stone shovel', cat: 'Tools' }, { t: 39, name: 'iron_shovel', label: 'Iron shovel', cat: 'Tools' },
+];
+/* Classic 16-column terrain.png indices for loading a whole old-style atlas */
+const CLASSIC = { 0: 0, 1: 3, 2: 2, 3: 1, 4: 18, 5: 20, 6: 21, 7: 52, 8: 4, 9: 16, 10: 205, 25: 38 };
+
+/* Mob skins. Sizes are in 1/16 block pixels. c = centre (x right, y up, z forward), s = box size,
+   uv = top-left of the box in the 64-wide skin, uvs = size used for the unwrap when different from s,
+   pv = pivot height, a0 = fixed X rotation, leg = swing direction, fur = uses the fur skin, col = default colour. */
+const H2 = Math.PI / 2;
+const SKINS = {
+  zombie: { w: 64, h: 64, label: 'Zombie', parts: [
+    { n: 'Head', c: [0, 28, 0], s: [8, 8, 8], uv: [0, 0], pv: 28, col: [0.4, 0.64, 0.36] },
+    { n: 'Body', c: [0, 18, 0], s: [8, 12, 4], uv: [16, 16], pv: 18, col: [0.2, 0.46, 0.62] },
+    { n: 'Arm', c: [-6, 18, 0], s: [4, 12, 4], uv: [40, 16], pv: 24, a0: -H2, col: [0.4, 0.64, 0.36] }, { n: 'Arm', c: [6, 18, 0], s: [4, 12, 4], uv: [40, 16], pv: 24, a0: -H2, col: [0.4, 0.64, 0.36], dup: 1 },
+    { n: 'Leg', c: [-2, 6, 0], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: 1, col: [0.25, 0.23, 0.52] }, { n: 'Leg', c: [2, 6, 0], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: -1, col: [0.25, 0.23, 0.52], dup: 1 }] },
+  pig: { w: 64, h: 32, label: 'Pig', parts: [
+    { n: 'Head', c: [0, 11, 11], s: [8, 8, 8], uv: [0, 0], pv: 11, col: [0.96, 0.66, 0.66] },
+    { n: 'Snout', c: [0, 10, 15.5], s: [4, 3, 1], uv: [16, 16], pv: 10, col: [0.86, 0.5, 0.52] },
+    { n: 'Body', c: [0, 10, 0], s: [10, 16, 8], uv: [28, 8], pv: 10, a0: -H2, col: [0.95, 0.62, 0.62] },
+    { n: 'Leg', c: [-3, 3, 5], s: [4, 6, 4], uv: [0, 16], pv: 6, leg: 1, col: [0.88, 0.55, 0.56] }, { n: 'Leg', c: [3, 3, 5], s: [4, 6, 4], uv: [0, 16], pv: 6, leg: -1, col: [0.88, 0.55, 0.56], dup: 1 },
+    { n: 'Leg', c: [-3, 3, -5], s: [4, 6, 4], uv: [0, 16], pv: 6, leg: -1, col: [0.88, 0.55, 0.56], dup: 1 }, { n: 'Leg', c: [3, 3, -5], s: [4, 6, 4], uv: [0, 16], pv: 6, leg: 1, col: [0.88, 0.55, 0.56], dup: 1 }] },
+  sheep: { w: 64, h: 32, label: 'Sheep', parts: [
+    { n: 'Head', c: [0, 19, 10], s: [6, 6, 8], uv: [0, 0], pv: 19, col: [0.4, 0.34, 0.3] },
+    { n: 'Body (fur layer)', c: [0, 16, 0], s: [11.5, 19.5, 9.5], uvs: [8, 16, 6], uv: [28, 8], pv: 16, a0: -H2, fur: 1, col: [0.92, 0.92, 0.88] },
+    { n: 'Leg', c: [-3, 6, 5], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: 1, col: [0.4, 0.34, 0.3] }, { n: 'Leg', c: [3, 6, 5], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: -1, col: [0.4, 0.34, 0.3], dup: 1 },
+    { n: 'Leg', c: [-3, 6, -5], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: -1, col: [0.4, 0.34, 0.3], dup: 1 }, { n: 'Leg', c: [3, 6, -5], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: 1, col: [0.4, 0.34, 0.3], dup: 1 }] },
+  sheep_fur: { w: 64, h: 32, label: 'Sheep fur', parts: [] },
+};
+/* Default tint colours for biome-coloured layers (lush end and dry end) */
+const TINT_DEFAULT = { grass: ['#7cbd4a', '#b9b24a'], foliage: ['#4f9a2c', '#8c9a2c'] };
+
+/* Shared zip helpers (stored + deflate read, stored write). Used by the game and the Texture Lab. */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+/* entries: [{ name: 'blocks/dirt.png', data: Uint8Array }] -> Blob */
+function makeZip(entries) {
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  for (const e of entries) {
+    const nm = enc.encode(e.name), crc = crc32(e.data), h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true); h.setUint16(10, 0, true); h.setUint16(12, 0x21, true);
+    h.setUint32(14, crc, true); h.setUint32(18, e.data.length, true); h.setUint32(22, e.data.length, true); h.setUint16(26, nm.length, true); h.setUint16(28, 0, true);
+    parts.push(h.buffer, nm, e.data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true); c.setUint16(12, 0, true); c.setUint16(14, 0x21, true);
+    c.setUint32(16, crc, true); c.setUint32(20, e.data.length, true); c.setUint32(24, e.data.length, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    central.push(c.buffer, nm); off += 30 + nm.length + e.data.length;
+  }
+  let csz = 0; for (let i = 0; i < central.length; i++) csz += central[i].byteLength !== undefined ? central[i].byteLength : central[i].length;
+  const end = new DataView(new ArrayBuffer(22)); end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true); end.setUint32(12, csz, true); end.setUint32(16, off, true);
+  return new Blob([...parts, ...central, end.buffer], { type: 'application/zip' });
+}
+/* zip File -> [File] (png and json entries only) */
+async function unzipFiles(file) {
+  const buf = await file.arrayBuffer(), dv = new DataView(buf), out = [];
+  let e = buf.byteLength - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--; if (e < 0) return out;
+  let p = dv.getUint32(e + 16, true); const n = dv.getUint16(e + 10, true);
+  for (let i = 0; i < n; i++) {
+    const method = dv.getUint16(p + 10, true), csz = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(new Uint8Array(buf, p + 46, nl)); p += 46 + nl + xl + cl;
+    if (name.endsWith('/') || !/\.(png|json)$/i.test(name)) continue;
+    const lo = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true); let data = new Uint8Array(buf, lo, csz);
+    if (method === 8) { try { data = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()); } catch (er) { continue; } }
+    else if (method !== 0) continue;
+    out.push(new File([data], name.split('/').pop(), { type: /json$/i.test(name) ? 'application/json' : 'image/png' }));
+  }
+  return out;
+}
+async function expandFiles(list) { let out = []; for (const f of list) { if (/\.zip$/i.test(f.name)) out = out.concat(await unzipFiles(f)); else out.push(f); } return out; }
+const baseName = f => f.name.toLowerCase().replace(/\.[a-z]+$/, '').replace(/[ -]\d+$/, '').replace(/\s+/g, '_');
+
+/* ---------- procedural texture atlas (original pixel art, generated at load) ---------- */
+function makeAtlas() {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+  const g = cv.getContext('2d'), img = g.createImageData(256, 256), d = img.data, rnd = mulberry32(90210);
+  const clamp = v => v < 0 ? 0 : v > 255 ? 255 : v | 0;
+  function fill(t, fn) {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const c = fn(x, y), i = (((t / 16) | 0) * 16 + y) * 1024 + ((t % 16) * 16 + x) * 4;
+      d[i] = clamp(c[0]); d[i + 1] = clamp(c[1]); d[i + 2] = clamp(c[2]); d[i + 3] = c[3] === undefined ? 255 : c[3];
+    }
+  }
+  const jit = (b, v) => { const n = (rnd() - 0.5) * 2 * v; return [b[0] + n, b[1] + n, b[2] + n]; };
+  fill(0, () => { const c = jit([232, 232, 232], 22); if (rnd() < 0.1) { c[0] -= 34; c[1] -= 34; c[2] -= 34; } return c; });
+  fill(2, () => { let c = jit([122, 86, 58], 16); if (rnd() < 0.1) c = [c[0] - 28, c[1] - 22, c[2] - 16]; if (rnd() < 0.04) c = [150, 140, 130]; return c; });
+  const depth = []; for (let x = 0; x < 16; x++) depth.push(3 + (rnd() < 0.45 ? 1 : 0) + (rnd() < 0.15 ? 1 : 0));
+  fill(1, () => { let c = jit([122, 86, 58], 16); if (rnd() < 0.1) c = [c[0] - 28, c[1] - 22, c[2] - 16]; if (rnd() < 0.04) c = [150, 140, 130]; return c; });
+  fill(25, (x, y) => { if (y >= depth[x]) return [0, 0, 0, 0]; const c = jit([232, 232, 232], 22); if (y === depth[x] - 1 && rnd() < 0.35) { c[0] -= 40; c[1] -= 40; c[2] -= 40; } return c; });
+  fill(3, (x, y) => { const b = vnoise(x * 0.45 + 40, y * 0.45, 5) * 36; return jit([138 - b, 138 - b, 140 - b], 12); });
+  fill(4, () => jit([222, 209, 152], 12));
+  const streak = []; for (let x = 0; x < 16; x++) streak.push((rnd() - 0.5) * 30);
+  fill(5, (x) => jit([104 + streak[x], 79 + streak[x] * 0.8, 48 + streak[x] * 0.5], 8));
+  fill(6, (x, y) => { const r = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); if (r > 6.6) return jit([92, 68, 40], 6); const k = Math.floor(Math.hypot(x - 7.5, y - 7.5)) % 3; return jit(k === 0 ? [172, 138, 88] : k === 1 ? [150, 116, 70] : [162, 128, 80], 6); });
+  fill(7, () => { if (rnd() < 0.17) return [0, 0, 0, 0]; const c = jit([196, 196, 196], 34); if (rnd() < 0.22) { c[0] -= 46; c[1] -= 46; c[2] -= 46; } return c; });
+  fill(8, (x, y) => { const r = y >> 2, seam = (y & 3) === 3, vs = x === ((r & 1) ? 4 : 11); const c = jit([178, 140, 84], 9); return seam || vs ? [c[0] - 46, c[1] - 42, c[2] - 34] : c; });
+  const pts = []; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) pts.push([i * 4 + 2 + (rnd() - 0.5) * 3, j * 4 + 2 + (rnd() - 0.5) * 3, 120 + rnd() * 40]);
+  fill(9, (x, y) => {
+    let d1 = 99, d2 = 99, tone = 130;
+    for (const p of pts) for (const ox of [-16, 0, 16]) for (const oy of [-16, 0, 16]) { const dd = Math.hypot(x - p[0] - ox, y - p[1] - oy); if (dd < d1) { d2 = d1; d1 = dd; tone = p[2]; } else if (dd < d2) d2 = dd; }
+    if (d2 - d1 < 1.1) return [62, 62, 64];
+    const n = (rnd() - 0.5) * 14; return [tone + n, tone + n, tone + 4 + n];
+  });
+  fill(10, (x, y) => { const w = vnoise(x * 0.5, y * 0.5, 8) * 40; const c = jit([36 + w * 0.3, 88 + w * 0.6, 196 + w * 0.4], 8); c[3] = 220; return c; });
+  const blobs = []; for (let i = 0; i < 6; i++) blobs.push([2 + rnd() * 12, 2 + rnd() * 12, 1.2 + rnd() * 1.4]);
+  fill(11, (x, y) => { for (const b of blobs) if (Math.hypot(x - b[0], y - b[1]) < b[2]) return jit([36, 36, 40], 10); const bn = vnoise(x * 0.45 + 40, y * 0.45, 5) * 36; return jit([138 - bn, 138 - bn, 140 - bn], 12); });
+  fill(12, (x, y) => { const b = vnoise(x * 0.6, y * 0.6, 3) * 50; return jit([70 - b * 0.5, 70 - b * 0.5, 74 - b * 0.5], 16); });
+  fill(13, (x, y) => { const edge = x === 0 || y === 0 || x === 15 || y === 15; if (edge) return [196, 228, 240, 235]; if ((x === 3 && y === 3) || (x === 4 && y === 4) || (x === 3 && y === 5) || (x === 5 && y === 3)) return [255, 255, 255, 190]; return [200, 235, 250, 40]; });
+  const px = (t, pts, col) => { for (const p of pts) { if (p[0] < 0 || p[0] > 15 || p[1] < 0 || p[1] > 15) continue; const i = (((t / 16) | 0) * 16 + p[1]) * 1024 + ((t % 16) * 16 + p[0]) * 4; d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255; } };
+  const clr = t => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) d[(((t / 16) | 0) * 16 + y) * 1024 + ((t % 16) * 16 + x) * 4 + 3] = 0; };
+  const stoneBase = (x, y) => { const b = vnoise(x * 0.45 + 40, y * 0.45, 5) * 36; return jit([138 - b, 138 - b, 140 - b], 12); };
+  fill(15, (x, y) => { for (const b of blobs) if (Math.hypot(x - b[0], y - b[1]) < b[2]) return jit([214, 168, 140], 10); return stoneBase(x, y); });
+  fill(16, (x, y) => { const c = jit([178, 140, 84], 9); if (x % 5 === 0 || y % 5 === 0) return [c[0] - 70, c[1] - 62, c[2] - 50]; return c; });
+  fill(17, (x, y) => { const c = jit([160, 122, 70], 9); if (y < 3) return jit([120, 88, 50], 6); if ((x > 2 && x < 7 && y > 5 && y < 12) || (x > 8 && x < 13 && y > 5 && y < 9)) return jit([92, 72, 50], 8); return c; });
+  fill(19, (x, y) => { if (x > 3 && x < 12 && y > 5 && y < 13) return y > 10 ? jit([232, 128, 40], 16) : jit([26, 26, 28], 6); if (x > 2 && x < 13 && y > 4 && y < 14) return [70, 70, 74]; return stoneBase(x, y); });
+  fill(20, (x, y) => (x === 0 || y === 0 || x === 15 || y === 15) ? [92, 92, 96] : stoneBase(x, y));
+  fill(21, (x, y) => { const c = jit([62, 62, 70], 8); if (y < 3) return jit([108, 108, 118], 8); if (x > 4 && x < 11 && y > 4 && y < 12) return jit([46, 46, 52], 6); return c; });
+  const HC = [[150, 112, 62], [140, 140, 144], [226, 226, 232]], HANDLE = [112, 80, 44];
+  const handle = (t, a) => { const pts = []; for (let i = a; i < 12; i++) pts.push([i, 15 - i]); px(t, pts, HANDLE); };
+  fill(22, () => [0, 0, 0, 0]); handle(22, 1); px(22, [[3, 12], [4, 11], [5, 10], [6, 9], [7, 8], [8, 7], [9, 6], [10, 5], [11, 4], [12, 3]], HANDLE);
+  fill(23, (x, y) => { const dx = x - 7.5, dy = y - 8; if (dx * dx / 30 + dy * dy / 24 > 1) return [0, 0, 0, 0]; return jit([34, 34, 38], 10); });
+  fill(24, (x, y) => { const sx = x - y * 0.4; if (y < 5 || y > 11 || x < 3 || x > 13 || sx < 1 || sx > 11) return [0, 0, 0, 0]; return y < 7 ? [240, 240, 244] : jit([206, 206, 212], 8); });
+  for (let tier = 0; tier < 3; tier++) {
+    const hc = HC[tier], lt = hc.map(v => Math.min(255, v + 30));
+    for (let k = 0; k < 4; k++) {
+      const t = 28 + k * 3 + tier; fill(t, () => [0, 0, 0, 0]);
+      if (k === 2) { const bl = []; for (let i = 5; i < 15; i++) { bl.push([i, 15 - i]); bl.push([i - 1, 15 - i]); } px(t, bl, hc); px(t, [[7, 7], [8, 6], [9, 5], [10, 4]], lt); px(t, [[3, 8], [4, 9], [5, 10], [6, 11], [7, 12], [4, 8], [6, 10]], HANDLE); handle(t, 1); px(t, [[3, 12], [2, 13]], HANDLE); continue;
+      }
+      handle(t, 1);
+      if (k === 0) px(t, [[5, 4], [6, 3], [7, 2], [8, 2], [9, 2], [10, 3], [11, 4], [12, 5], [12, 6], [4, 5], [4, 6], [5, 5], [6, 4], [11, 5]], hc);
+      if (k === 1) px(t, [[8, 2], [9, 2], [10, 2], [8, 3], [9, 3], [10, 3], [11, 3], [9, 4], [10, 4], [11, 4], [12, 4], [10, 5], [11, 5], [8, 4], [7, 3]], hc);
+      if (k === 3) px(t, [[11, 1], [12, 1], [10, 2], [11, 2], [12, 2], [13, 2], [10, 3], [11, 3], [12, 3], [13, 3], [11, 4], [12, 4], [9, 4]], hc);
+    }
+  }
+  fill(14, (x, y) => { const dx = x - 7.5, dy = y - 8; if (dx * dx / 42 + dy * dy / 26 > 1) return [0, 0, 0, 0]; if (x > 11 && y < 6 && dx * dx / 4 + (dy + 4) * (dy + 4) / 4 < 2) return [235, 230, 215]; return jit(dy < -1 ? [200, 90, 90] : [225, 130, 120], 14); });
+  g.putImageData(img, 0, 0);
+  return cv;
+}
+
+
+/* ===== Texture Lab. Uses TILES, SKINS, makeAtlas, makeZip, expandFiles from the shared sources. ===== */
+const $ = id => document.getElementById(id);
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const STORE = 'blockland-texlab-v1';
+
+/* ---------- default art ---------- */
+const atlas = makeAtlas();
+const slots = {}; // key -> { key, label, cat, w, h, canvas, def (ImageData), tint, mod }
+for (const t of TILES) {
+  const c = mk(16, 16); c.getContext('2d').drawImage(atlas, (t.t % 16) * 16, Math.floor(t.t / 16) * 16, 16, 16, 0, 0, 16, 16);
+  slots[t.name] = { key: t.name, label: t.label, cat: t.cat, w: 16, h: 16, canvas: c, tint: t.tint, tile: t, mod: false };
+}
+function faceRects(p) {
+  const [W, H, D] = p.uvs || p.s, u = p.uv[0], v = p.uv[1];
+  return [['top', u + D, v, W, D], ['bottom', u + D + W, v, W, D], ['right', u, v + D, D, H], ['front', u + D, v + D, W, H], ['left', u + D + W, v + D, D, H], ['back', u + 2 * D + W, v + D, W, H]];
+}
+const shadeCol = (c, k) => 'rgb(' + c.map(v => Math.round(Math.min(1, v * k) * 255)).join(',') + ')';
+for (const key in SKINS) {
+  const S = SKINS[key], c = mk(S.w, S.h), g = c.getContext('2d'), fur = key === 'sheep_fur';
+  for (const p of (fur ? SKINS.sheep.parts : S.parts)) {
+    if (!!p.fur !== fur) continue;
+    for (const r of faceRects(p)) { g.fillStyle = shadeCol(p.col, r[0] === 'top' ? 1 : r[0] === 'bottom' ? 0.6 : 0.82); g.fillRect(r[1], r[2], r[3], r[4]); }
+  }
+  slots['skin:' + key] = { key: 'skin:' + key, label: S.label, cat: 'Mobs', w: S.w, h: S.h, canvas: c, skin: key, mod: false };
+}
+for (const k in slots) slots[k].def = slots[k].canvas.getContext('2d').getImageData(0, 0, slots[k].w, slots[k].h);
+
+/* ---------- state ---------- */
+const tint = { grass: TINT_DEFAULT.grass[0], foliage: TINT_DEFAULT.foliage[0] };
+let cur = slots.grass_top, tool = 'pencil', recent = [], undo = new Map(), tab = 'Blocks';
+let saveT = 0;
+try {
+  const s = JSON.parse(localStorage.getItem(STORE) || 'null');
+  if (s) { if (s.tint) Object.assign(tint, s.tint); recent = s.recent || []; for (const k in (s.slots || {})) if (slots[k]) { const im = new Image(); im.onload = () => { const c = slots[k].canvas.getContext('2d'); c.clearRect(0, 0, slots[k].w, slots[k].h); c.drawImage(im, 0, 0); slots[k].mod = true; redrawThumb(slots[k]); if (cur === slots[k]) draw(); }; im.src = s.slots[k]; } }
+} catch (e) { }
+function persist() {
+  clearTimeout(saveT); saveT = setTimeout(() => {
+    try { const o = {}; for (const k in slots) if (slots[k].mod) o[k] = slots[k].canvas.toDataURL(); localStorage.setItem(STORE, JSON.stringify({ tint, recent, slots: o })); } catch (e) { }
+  }, 500);
+}
+let toastT = 0;
+function toast(m) { const t = $('toast'); t.textContent = m; t.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => t.style.opacity = 0, 1800); }
+
+/* ---------- list ---------- */
+const thumbs = {};
+function redrawThumb(s) { const c = thumbs[s.key]; if (!c) return; const g = c.getContext('2d'); g.clearRect(0, 0, 32, 32); g.imageSmoothingEnabled = false; const sc = Math.min(32 / s.w, 32 / s.h); g.drawImage(s.canvas, 0, 0, s.w * sc, s.h * sc); const b = c.parentNode; if (b) b.classList.toggle('mod', s.mod); }
+function buildList() {
+  const L = $('list'); L.innerHTML = ''; let lastCat = '';
+  for (const k in slots) {
+    const s = slots[k], isMob = s.cat === 'Mobs'; if ((tab === 'Mobs') !== isMob) continue;
+    if (s.cat !== lastCat) { lastCat = s.cat; const h = document.createElement('div'); h.className = 'cat'; h.textContent = s.cat; L.appendChild(h); }
+    const b = document.createElement('button'); b.className = 'slotbtn' + (s === cur ? ' sel' : '') + (s.mod ? ' mod' : '');
+    const c = mk(32, 32); thumbs[k] = c; b.appendChild(c);
+    const sp = document.createElement('span'); sp.textContent = s.label; b.appendChild(sp); b.appendChild(document.createElement('i'));
+    b.onclick = () => select(s); L.appendChild(b); redrawThumb(s);
+  }
+}
+function select(s) { cur = s; buildList(); layout(); $('slotTitle').textContent = s.label; $('slotInfo').textContent = s.w + ' x ' + s.h + (s.tile ? '   file: ' + s.tile.name + '.png' : '   file: ' + s.skin + '.png'); $('tintRow').hidden = !s.tint; $('guideRow').hidden = !s.skin; draw(); previews(); }
+function setTab(t) { tab = t; $('tabBlocks').classList.toggle('on', t === 'Blocks'); $('tabMobs').classList.toggle('on', t === 'Mobs'); const first = Object.values(slots).find(s => (s.cat === 'Mobs') === (t === 'Mobs')); select(first); }
+$('tabBlocks').onclick = () => setTab('Blocks'); $('tabMobs').onclick = () => setTab('Mobs');
+
+/* ---------- editor canvas ---------- */
+const cv = $('cv'), cg = cv.getContext('2d');
+let scale = 20;
+function layout() {
+  const avail = Math.max(240, ($('stage').clientWidth || 600) - 28);
+  scale = Math.max(4, Math.min(24, Math.floor(avail / cur.w))); cv.width = cur.w * scale; cv.height = cur.h * scale;
+}
+function tinted(s) {
+  const c = mk(s.w, s.h), g = c.getContext('2d'); g.drawImage(s.canvas, 0, 0);
+  if (s.tint) { g.globalCompositeOperation = 'multiply'; g.fillStyle = tint[s.tint]; g.fillRect(0, 0, s.w, s.h); g.globalCompositeOperation = 'destination-in'; g.drawImage(s.canvas, 0, 0); }
+  return c;
+}
+function draw() {
+  const s = cur, W = cv.width, Hh = cv.height; cg.imageSmoothingEnabled = false; cg.clearRect(0, 0, W, Hh);
+  const cs = Math.max(4, scale / 2);
+  for (let y = 0; y < Hh; y += cs) for (let x = 0; x < W; x += cs) { cg.fillStyle = ((x / cs + y / cs) & 1) ? '#2a2a2a' : '#1c1c1c'; cg.fillRect(x, y, cs, cs); }
+  cg.drawImage(s.tint && $('optTint').checked ? tinted(s) : s.canvas, 0, 0, W, Hh);
+  if (scale >= 8) { cg.strokeStyle = 'rgba(255,255,255,.10)'; cg.lineWidth = 1; cg.beginPath(); for (let x = 0; x <= s.w; x++) { cg.moveTo(x * scale + .5, 0); cg.lineTo(x * scale + .5, Hh); } for (let y = 0; y <= s.h; y++) { cg.moveTo(0, y * scale + .5); cg.lineTo(W, y * scale + .5); } cg.stroke(); }
+  if (s.skin && $('optGuide').checked) {
+    const parts = s.skin === 'sheep_fur' ? SKINS.sheep.parts.filter(p => p.fur) : SKINS[s.skin].parts.filter(p => !(s.skin === 'sheep' && p.fur));
+    const seen = new Set(); cg.font = '600 ' + Math.max(9, Math.floor(scale * 0.9)) + 'px monospace'; cg.textBaseline = 'top';
+    for (const p of parts) { if (p.dup) continue; for (const r of faceRects(p)) { const key = r.join(','); if (seen.has(key)) continue; seen.add(key);
+      cg.strokeStyle = 'rgba(166,217,79,.9)'; cg.lineWidth = 1; cg.strokeRect(r[1] * scale + .5, r[2] * scale + .5, r[3] * scale - 1, r[4] * scale - 1);
+      if (r[3] * scale > 60 && r[4] * scale > 14) { cg.fillStyle = 'rgba(0,0,0,.6)'; const label = p.n + ' ' + r[0]; const tw = cg.measureText(label).width; cg.fillRect(r[1] * scale + 2, r[2] * scale + 2, Math.min(tw + 6, r[3] * scale - 4), scale * 1.1); cg.fillStyle = '#fff'; cg.fillText(label, r[1] * scale + 5, r[2] * scale + 3, r[3] * scale - 8); } } }
+  }
+}
+/* paint */
+const colorRGBA = () => { const h = $('col').value, a = +$('alpha').value / 100; return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), Math.round(a * 255)]; };
+function ctx() { return cur.canvas.getContext('2d', { willReadFrequently: true }); }
+function pushUndo() { const l = undo.get(cur.key) || []; l.push(ctx().getImageData(0, 0, cur.w, cur.h)); if (l.length > 40) l.shift(); undo.set(cur.key, l); }
+function setPx(x, y, rgba) { if (x < 0 || y < 0 || x >= cur.w || y >= cur.h) return; const g = ctx(), id = g.createImageData(1, 1); id.data.set(rgba); g.putImageData(id, x, y); }
+function plot(x, y) {
+  const erase = tool === 'eraser', c = erase ? [0, 0, 0, 0] : colorRGBA();
+  setPx(x, y, c); if ($('optMirror').checked) setPx(cur.w - 1 - x, y, c);
+}
+function flood(x, y) {
+  const g = ctx(), id = g.getImageData(0, 0, cur.w, cur.h), d = id.data, W = cur.w, c = colorRGBA(), i0 = (y * W + x) * 4, t = [d[i0], d[i0 + 1], d[i0 + 2], d[i0 + 3]];
+  if (t.every((v, i) => v === c[i])) return; const st = [[x, y]];
+  while (st.length) { const [px, py] = st.pop(); if (px < 0 || py < 0 || px >= W || py >= cur.h) continue; const i = (py * W + px) * 4; if (d[i] !== t[0] || d[i + 1] !== t[1] || d[i + 2] !== t[2] || d[i + 3] !== t[3]) continue; d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = c[3]; st.push([px + 1, py], [px - 1, py], [px, py + 1], [px, py - 1]); }
+  g.putImageData(id, 0, 0);
+}
+function pickAt(x, y) { if (x < 0 || y < 0 || x >= cur.w || y >= cur.h) return; const d = ctx().getImageData(x, y, 1, 1).data; if (d[3] === 0) return; $('col').value = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join(''); $('alpha').value = Math.round(d[3] / 2.55); }
+function touched() { cur.mod = true; redrawThumb(cur); draw(); previews(); persist(); }
+let drawing = false, lx = 0, ly = 0;
+const cell = e => { const r = cv.getBoundingClientRect(); return [Math.floor((e.clientX - r.left) * (cv.width / r.width) / scale), Math.floor((e.clientY - r.top) * (cv.height / r.height) / scale)]; };
+function line(x0, y0, x1, y1) { const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let err = dx - dy; for (; ;) { plot(x0, y0); if (x0 === x1 && y0 === y1) break; const e2 = 2 * err; if (e2 > -dy) { err -= dy; x0 += sx; } if (e2 < dx) { err += dx; y0 += sy; } } }
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault(); const [x, y] = cell(e);
+  if (tool === 'pick') { pickAt(x, y); return; }
+  pushUndo(); cv.setPointerCapture(e.pointerId);
+  if (tool === 'fill') { flood(x, y); addRecent(); touched(); return; }
+  drawing = true; lx = x; ly = y; plot(x, y); touched();
+});
+cv.addEventListener('pointermove', e => { if (!drawing) return; const [x, y] = cell(e); if (x === lx && y === ly) return; line(lx, ly, x, y); lx = x; ly = y; touched(); });
+const endDraw = () => { if (drawing) addRecent(); drawing = false; };
+cv.addEventListener('pointerup', endDraw); cv.addEventListener('pointercancel', endDraw);
+function doUndo() { const l = undo.get(cur.key); if (!l || !l.length) return toast('Nothing to undo'); ctx().putImageData(l.pop(), 0, 0); touched(); }
+$('btnUndo').onclick = doUndo;
+window.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo(); } });
+document.querySelectorAll('#tools [data-tool]').forEach(b => b.onclick = () => { tool = b.dataset.tool; document.querySelectorAll('#tools [data-tool]').forEach(x => x.classList.toggle('on', x === b)); });
+
+/* swatches */
+const BASE_SW = ['#000000', '#ffffff', '#7a7a7e', '#b0b0b4', '#7a563a', '#a8885a', '#c8b078', '#e0cf98', '#7cbd4a', '#4f9a2c', '#2e6a1e', '#3a7ad0', '#d04040', '#e8a030', '#f0e050', '#6a3ab0'];
+function addRecent() { const h = $('col').value; if (recent[0] !== h) { recent = [h, ...recent.filter(x => x !== h)].slice(0, 12); drawSwatches(); persist(); } }
+function drawSwatches() { const S = $('swatches'); S.innerHTML = ''; for (const h of [...recent, ...BASE_SW]) { const b = document.createElement('button'); b.className = 'sw'; b.style.background = h; b.title = h; b.setAttribute('aria-label', h); b.onclick = () => { $('col').value = h; }; S.appendChild(b); } }
+
+/* transforms */
+function xform(fn) { pushUndo(); const g = ctx(), id = g.getImageData(0, 0, cur.w, cur.h), out = g.createImageData(cur.w, cur.h); for (let y = 0; y < cur.h; y++) for (let x = 0; x < cur.w; x++) { const [sx, sy] = fn(x, y); const a = ((sy + cur.h) % cur.h * cur.w + (sx + cur.w) % cur.w) * 4, b = (y * cur.w + x) * 4; for (let k = 0; k < 4; k++) out.data[b + k] = id.data[a + k]; } g.putImageData(out, 0, 0); touched(); }
+$('btnFlipH').onclick = () => xform((x, y) => [cur.w - 1 - x, y]); $('btnFlipV').onclick = () => xform((x, y) => [x, cur.h - 1 - y]);
+$('btnL').onclick = () => xform((x, y) => [x + 1, y]); $('btnR').onclick = () => xform((x, y) => [x - 1, y]); $('btnU').onclick = () => xform((x, y) => [x, y + 1]); $('btnD').onclick = () => xform((x, y) => [x, y - 1]);
+$('btnClear').onclick = () => { pushUndo(); ctx().clearRect(0, 0, cur.w, cur.h); touched(); };
+$('btnReset').onclick = () => { pushUndo(); ctx().putImageData(cur.def, 0, 0); cur.mod = false; redrawThumb(cur); draw(); previews(); persist(); toast('Slot reset'); };
+$('optTint').onchange = draw; $('optGuide').onchange = draw;
+
+/* import / export */
+async function loadInto(s, bmp, sx, sy, sw, sh) { pushUndo(); const g = s.canvas.getContext('2d'); g.imageSmoothingEnabled = false; g.clearRect(0, 0, s.w, s.h); g.drawImage(bmp, sx || 0, sy || 0, sw || bmp.width, sh || bmp.height, 0, 0, s.w, s.h); s.mod = true; redrawThumb(s); }
+$('btnLoadSlot').onclick = () => $('fileSlot').click();
+$('fileSlot').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const b = await createImageBitmap(f); await loadInto(cur, b, 0, 0, cur.skin ? b.width : b.width, cur.skin ? b.height : (cur.key === 'water_still' ? b.width : b.height)); draw(); previews(); persist(); } catch (er) { toast('That file is not a PNG image'); } e.target.value = ''; };
+$('btnSaveSlot').onclick = () => cur.canvas.toBlob(b => download(b, (cur.tile ? cur.tile.name : cur.skin) + '.png'));
+$('btnImport').onclick = () => $('fileImport').click();
+const BLOCKMAP = {}; for (const t of TILES) { BLOCKMAP[t.name] = t.name; (t.alias || []).forEach(n => BLOCKMAP[n] = t.name); }
+$('fileImport').onchange = async e => {
+  const files = await expandFiles([...e.target.files]); let n = 0;
+  for (const f of files) {
+    if (/pack\.json$/i.test(f.name)) { try { const j = JSON.parse(await f.text()); if (j.tint) { Object.assign(tint, j.tint); $('tGrass').value = tint.grass; $('tFoliage').value = tint.foliage; } } catch (er) { } continue; }
+    let b; try { b = await createImageBitmap(f); } catch (er) { continue; }
+    const key = baseName(f);
+    if (BLOCKMAP[key]) { const s = slots[BLOCKMAP[key]]; await loadInto(s, b, 0, 0, b.width, key === 'water_still' ? b.width : b.height); n++; }
+    else if (slots['skin:' + key]) { const s = slots['skin:' + key], h = Math.round(b.width * s.h / s.w); await loadInto(s, b, 0, 0, b.width, Math.min(b.height, h)); n++; }
+    else if (b.width === b.height && b.width >= 256 && b.width % 16 === 0) { const ts = b.width / 16; for (const t of TILES) if (CLASSIC[t.t] !== undefined) { const src = CLASSIC[t.t]; await loadInto(slots[t.name], b, (src % 16) * ts, Math.floor(src / 16) * ts, ts, ts); } n++; }
+  }
+  e.target.value = ''; toast(n ? n + ' file' + (n > 1 ? 's' : '') + ' imported' : 'No matching files. Use the names shown under each slot.'); buildList(); draw(); previews(); persist();
+};
+function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+$('btnExport').onclick = async () => {
+  const all = $('optAll').checked, entries = [], list = Object.values(slots).filter(s => all || s.mod);
+  if (!list.length) return toast('Nothing changed yet. Edit a texture or tick "include unchanged".');
+  for (const s of list) {
+    const blob = await new Promise(r => s.canvas.toBlob(r, 'image/png')), data = new Uint8Array(await blob.arrayBuffer());
+    entries.push({ name: (s.skin ? 'entity/' + s.skin : (s.cat === 'Blocks' ? 'blocks/' : 'items/') + s.tile.name) + '.png', data });
+  }
+  entries.push({ name: 'pack.json', data: new TextEncoder().encode(JSON.stringify({ game: 'Blockland', tint }, null, 2)) });
+  download(makeZip(entries), 'blockland-pack.zip'); toast('Exported ' + list.length + ' textures');
+};
+
+/* ---------- previews ---------- */
+const CUBE = { grass_top: ['grass_top', 'grass'], grass_side: ['grass_top', 'grass'], grass_side_overlay: ['grass_top', 'grass'], log_oak: ['log_oak_top', 'log_oak'], log_oak_top: ['log_oak_top', 'log_oak'], crafting_table_top: ['crafting_table_top', 'crafting_table_side'], crafting_table_side: ['crafting_table_top', 'crafting_table_side'], furnace_front_off: ['furnace_top', 'furnace_front_off'], furnace_top: ['furnace_top', 'furnace_front_off'] };
+function faceCanvas(name) { // composited, tinted 16x16 face
+  if (name === 'grass') { const c = mk(16, 16), g = c.getContext('2d'); g.drawImage(slots.grass_side.canvas, 0, 0); g.drawImage(tinted(slots.grass_side_overlay), 0, 0); return c; }
+  const s = slots[name]; return s.tint ? tinted(s) : s.canvas;
+}
+function previews() {
+  if (cur.skin) { for (const id of ['pvOne', 'pvTile', 'pvCube']) { const c = $(id); c.getContext('2d').clearRect(0, 0, c.width, c.height); } const g = $('pvOne').getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(cur.canvas, 0, 0, 96, Math.min(96, 96 * cur.h / cur.w)); return; }
+  const one = $('pvOne').getContext('2d'), til = $('pvTile').getContext('2d'); one.imageSmoothingEnabled = til.imageSmoothingEnabled = false; one.clearRect(0, 0, 96, 96); til.clearRect(0, 0, 96, 96);
+  const f = cur.key === 'grass_side_overlay' ? faceCanvas('grass') : cur.tint ? tinted(cur) : cur.canvas;
+  one.drawImage(f, 0, 0, 96, 96); for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) til.drawImage(f, x * 32, y * 32, 32, 32);
+  const cg2 = $('pvCube').getContext('2d'); cg2.imageSmoothingEnabled = false; cg2.clearRect(0, 0, 120, 112);
+  const m = CUBE[cur.key] || [cur.key, cur.key], top = faceCanvas(m[0] === 'grass_top' ? 'grass_top' : m[0]), side = faceCanvas(m[1]), k = 3, cx = 60, yt = 6;
+  const face = (img, a, b, c, d, e, f2, shade) => { cg2.save(); cg2.setTransform(a, b, c, d, e, f2); cg2.drawImage(img, 0, 0); if (shade) { cg2.fillStyle = 'rgba(0,0,0,' + shade + ')'; cg2.fillRect(0, 0, 16, 16); } cg2.restore(); };
+  face(top, k, k * .5, -k, k * .5, cx, yt, 0); face(side, k, k * .5, 0, k, cx - 16 * k, yt + 8 * k, 0.28); face(side, k, -k * .5, 0, k, cx, yt + 16 * k, 0.45);
+}
+$('tGrass').oninput = e => { tint.grass = e.target.value; draw(); previews(); persist(); };
+$('tFoliage').oninput = e => { tint.foliage = e.target.value; draw(); previews(); persist(); };
+$('tGrass').value = tint.grass; $('tFoliage').value = tint.foliage;
+window.addEventListener('resize', () => { layout(); draw(); });
+drawSwatches(); setTab('Blocks');
+
+</script>
+</body>
+</html>
