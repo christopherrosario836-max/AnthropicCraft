@@ -43,6 +43,7 @@ input[type=range]{accent-color:var(--lime);width:110px}
 label.opt{display:inline-flex;gap:6px;align-items:center;cursor:pointer;color:var(--dim)}
 .pv{display:flex;flex-direction:column;gap:12px}
 .pv canvas{image-rendering:pixelated;background:repeating-conic-gradient(#222 0 25%,#333 0 50%) 0 0/8px 8px;border:2px solid #000;max-width:100%}
+#report{border:2px solid var(--lime);background:var(--panel2);padding:10px}#report details{margin-top:6px}#report summary{cursor:pointer;color:var(--amber)}#report pre{max-height:200px;overflow:auto;font:12px ui-monospace,monospace;color:var(--dim);margin:4px 0 0;white-space:pre-wrap}
 .hint{color:var(--dim);font-size:13px;line-height:1.4;margin:0}
 .toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--panel2);border:2px solid var(--edge);padding:8px 14px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
 @media (max-width:980px){main{grid-template-columns:1fr}#side{position:static;max-height:260px}}
@@ -50,14 +51,15 @@ label.opt{display:inline-flex;gap:6px;align-items:center;cursor:pointer;color:va
 </head>
 <body>
 <header>
-  <div><h1>Blockland Texture Lab</h1><p class="hint">Paint blocks, items and mob skins. Export a pack the game can load.</p></div>
+  <div><h1>Blockland Texture Lab</h1><p class="hint">Scan your own texture zip, fix what you like, then export a pack the game can load.</p></div>
   <div class="row">
-    <button id="btnImport">Import</button>
+    <button id="btnImport">Scan a zip</button><button id="btnFolder">Scan a folder</button>
     <button id="btnExport" class="go">Export pack (.zip)</button>
     <label class="opt"><input type="checkbox" id="optAll"> include unchanged</label>
-    <a class="btn" href="./">Open the game</a>
+    <a class="btn" href="index.html">Open the game</a>
   </div>
   <input type="file" id="fileImport" accept="image/png,.zip" multiple hidden>
+  <input type="file" id="fileFolder" webkitdirectory multiple hidden>
   <input type="file" id="fileSlot" accept="image/png" hidden>
 </header>
 <main>
@@ -66,6 +68,7 @@ label.opt{display:inline-flex;gap:6px;align-items:center;cursor:pointer;color:va
     <div id="list"></div>
   </section>
   <section id="stage">
+    <div id="report" hidden></div>
     <div class="row" style="justify-content:space-between"><h2 id="slotTitle">Texture</h2><span class="hint" id="slotInfo"></span></div>
     <div class="row" id="tools">
       <button data-tool="pencil" class="on">Pencil</button><button data-tool="eraser">Eraser</button><button data-tool="fill">Fill</button><button data-tool="pick">Pick</button>
@@ -135,9 +138,18 @@ function fbm2(x, z, oct) {
 function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
 
-/* ===== Shared manifest: the single source of truth for texture slots and mob skins.
-   The game and the Texture Lab are both built from this file, so adding a slot here
-   adds it to both. t = tile index in the 16x16-tile atlas. tint = biome colour layer. ===== */
+/* ===== Shared manifest: single source of truth for texture slots and mob skins =====
+   The game and the Texture Lab are built from this file. Adding a texture here adds it to both.
+   Atlas: 32 tiles per row, 16 px tiles (512 x 512). tint: 'grass' | 'foliage' | 'dye' (multiplied in game). */
+const ATLAS_COLS = 32, ATLAS_PX = 512;
+const H2 = Math.PI / 2;
+const DYES = [
+  ['white', [249, 255, 254]], ['orange', [249, 128, 29]], ['magenta', [199, 78, 189]], ['light_blue', [58, 179, 218]],
+  ['yellow', [254, 216, 61]], ['lime', [128, 199, 31]], ['pink', [243, 139, 170]], ['gray', [71, 79, 82]],
+  ['silver', [157, 157, 151]], ['cyan', [22, 156, 156]], ['purple', [137, 50, 184]], ['blue', [60, 68, 170]],
+  ['brown', [131, 84, 50]], ['green', [94, 124, 22]], ['red', [176, 46, 38]], ['black', [29, 29, 33]],
+];
+const SPECIES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak'];
 const TILES = [
   { t: 0, name: 'grass_top', label: 'Grass top', cat: 'Blocks', tint: 'grass' },
   { t: 1, name: 'grass_side', label: 'Grass side (dirt part)', cat: 'Blocks' },
@@ -145,10 +157,10 @@ const TILES = [
   { t: 2, name: 'dirt', label: 'Dirt', cat: 'Blocks' },
   { t: 3, name: 'stone', label: 'Stone', cat: 'Blocks' },
   { t: 4, name: 'sand', label: 'Sand', cat: 'Blocks' },
-  { t: 5, name: 'log_oak', label: 'Log side', cat: 'Blocks' },
-  { t: 6, name: 'log_oak_top', label: 'Log top', cat: 'Blocks' },
-  { t: 7, name: 'leaves_oak', label: 'Leaves', cat: 'Blocks', tint: 'foliage' },
-  { t: 8, name: 'planks_oak', label: 'Planks', cat: 'Blocks' },
+  { t: 5, name: 'log_oak', label: 'Oak log side', cat: 'Blocks' },
+  { t: 6, name: 'log_oak_top', label: 'Oak log top', cat: 'Blocks' },
+  { t: 7, name: 'leaves_oak', label: 'Leaves (tinted)', cat: 'Blocks', tint: 'foliage' },
+  { t: 8, name: 'planks_oak', label: 'Oak planks', cat: 'Blocks' },
   { t: 9, name: 'cobblestone', label: 'Cobblestone', cat: 'Blocks' },
   { t: 10, name: 'water_still', label: 'Water', cat: 'Blocks' },
   { t: 11, name: 'coal_ore', label: 'Coal ore', cat: 'Blocks' },
@@ -159,8 +171,8 @@ const TILES = [
   { t: 17, name: 'crafting_table_side', label: 'Crafting table side', cat: 'Blocks' },
   { t: 19, name: 'furnace_front_off', label: 'Furnace front', cat: 'Blocks' },
   { t: 20, name: 'furnace_top', label: 'Furnace top', cat: 'Blocks' },
-  { t: 21, name: 'anvil_base', label: 'Anvil', cat: 'Blocks' },
-  { t: 14, name: 'beef_raw', alias: ['porkchop_raw', 'mutton_raw'], label: 'Raw meat', cat: 'Items' },
+  { t: 21, name: 'anvil_base', label: 'Anvil base', cat: 'Blocks' },
+  { t: 14, name: 'beef_raw', alias: ['porkchop_raw', 'mutton_raw'], label: 'Raw meat', cat: 'Food' },
   { t: 22, name: 'stick', label: 'Stick', cat: 'Items' },
   { t: 23, name: 'coal', label: 'Coal', cat: 'Items' },
   { t: 24, name: 'iron_ingot', label: 'Iron ingot', cat: 'Items' },
@@ -169,34 +181,301 @@ const TILES = [
   { t: 34, name: 'wood_sword', label: 'Wooden sword', cat: 'Tools' }, { t: 35, name: 'stone_sword', label: 'Stone sword', cat: 'Tools' }, { t: 36, name: 'iron_sword', label: 'Iron sword', cat: 'Tools' },
   { t: 37, name: 'wood_shovel', label: 'Wooden shovel', cat: 'Tools' }, { t: 38, name: 'stone_shovel', label: 'Stone shovel', cat: 'Tools' }, { t: 39, name: 'iron_shovel', label: 'Iron shovel', cat: 'Tools' },
 ];
-/* Classic 16-column terrain.png indices for loading a whole old-style atlas */
+/* Generated slots. T(name, label, category, tint, painter, ...painter args). Painters live in art.js. */
+let _nextTile = 40;
+function T(name, label, cat, tint, kind, ...args) { TILES.push({ t: _nextTile++, name, label, cat, tint: tint || undefined, spec: [kind, ...args] }); }
+(function () {
+  const B = 'Blocks', P = 'Plants', I = 'Items', F = 'Food', TL = 'Tools';
+  /* terrain */
+  T('coarse_dirt', 'Coarse dirt', B, 0, 'noise', [112, 78, 54], 18, 0.1);
+  T('dirt_podzol_top', 'Podzol top', B, 0, 'blotch', [104, 72, 40], 30, 12);
+  T('dirt_podzol_side', 'Podzol side', B, 0, 'special', 'podzol_side');
+  T('gravel', 'Gravel', B, 0, 'gravel');
+  T('red_sand', 'Red sand', B, 0, 'noise', [190, 104, 36], 12, 0.05);
+  T('clay', 'Clay', B, 0, 'noise', [160, 166, 180], 8, 0.04);
+  T('hardened_clay', 'Terracotta', B, 0, 'noise', [152, 94, 68], 8, 0.04);
+  T('sandstone_normal', 'Sandstone side', B, 0, 'sandstone', [222, 208, 150], 'side');
+  T('sandstone_top', 'Sandstone top', B, 0, 'sandstone', [222, 208, 150], 'top');
+  T('sandstone_carved', 'Sandstone chiseled', B, 0, 'sandstone', [222, 208, 150], 'carved');
+  T('red_sandstone_normal', 'Red sandstone side', B, 0, 'sandstone', [186, 98, 34], 'side');
+  T('red_sandstone_top', 'Red sandstone top', B, 0, 'sandstone', [186, 98, 34], 'top');
+  T('red_sandstone_carved', 'Red sandstone chiseled', B, 0, 'sandstone', [186, 98, 34], 'carved');
+  T('stone_granite', 'Granite', B, 0, 'blotch', [156, 108, 90], 30, 14);
+  T('stone_granite_smooth', 'Polished granite', B, 0, 'noise', [160, 112, 94], 5, 0.02);
+  T('stone_diorite', 'Diorite', B, 0, 'blotch', [200, 200, 200], 44, 12);
+  T('stone_diorite_smooth', 'Polished diorite', B, 0, 'noise', [196, 196, 198], 5, 0.02);
+  T('stone_andesite', 'Andesite', B, 0, 'blotch', [140, 140, 142], 30, 10);
+  T('stone_andesite_smooth', 'Polished andesite', B, 0, 'noise', [138, 138, 140], 5, 0.02);
+  T('cobblestone_mossy', 'Mossy cobblestone', B, 0, 'cobble', true);
+  T('stonebrick', 'Stone bricks', B, 0, 'stonebrick', 'plain');
+  T('stonebrick_mossy', 'Mossy stone bricks', B, 0, 'stonebrick', 'mossy');
+  T('stonebrick_cracked', 'Cracked stone bricks', B, 0, 'stonebrick', 'cracked');
+  T('stonebrick_carved', 'Chiseled stone bricks', B, 0, 'stonebrick', 'carved');
+  T('brick', 'Bricks', B, 0, 'bricks', [150, 80, 62], [186, 180, 170]);
+  T('obsidian', 'Obsidian', B, 0, 'noise', [20, 14, 32], 10, 0.1);
+  T('snow', 'Snow', B, 0, 'noise', [246, 250, 252], 5, 0.06);
+  T('ice', 'Ice', B, 0, 'special', 'ice');
+  T('ice_packed', 'Packed ice', B, 0, 'special', 'packed_ice');
+  T('lava_still', 'Lava', B, 0, 'special', 'lava');
+  T('glowstone', 'Glowstone', B, 0, 'special', 'glowstone');
+  T('sea_lantern', 'Sea lantern', B, 0, 'special', 'sea_lantern');
+  /* ores and mineral blocks */
+  T('gold_ore', 'Gold ore', B, 0, 'ore', [250, 214, 70], 8);
+  T('diamond_ore', 'Diamond ore', B, 0, 'ore', [90, 230, 224], 7);
+  T('emerald_ore', 'Emerald ore', B, 0, 'ore', [40, 200, 90], 5);
+  T('redstone_ore', 'Redstone ore', B, 0, 'ore', [220, 30, 24], 9);
+  T('lapis_ore', 'Lapis ore', B, 0, 'ore', [40, 76, 190], 8);
+  T('iron_block', 'Iron block', B, 0, 'metal', [216, 216, 220]);
+  T('gold_block', 'Gold block', B, 0, 'metal', [250, 214, 70]);
+  T('diamond_block', 'Diamond block', B, 0, 'metal', [98, 232, 224]);
+  T('emerald_block', 'Emerald block', B, 0, 'metal', [60, 210, 100]);
+  T('redstone_block', 'Redstone block', B, 0, 'metal', [190, 30, 20]);
+  T('lapis_block', 'Lapis block', B, 0, 'metal', [40, 76, 180]);
+  T('coal_block', 'Coal block', B, 0, 'metal', [24, 24, 28]);
+  /* dyeable (tinted) */
+  T('wool_colored_white', 'Wool (dyed)', B, 'dye', 'wool');
+  T('hardened_clay_stained_white', 'Stained terracotta (dyed)', B, 'dye', 'noise', [200, 200, 200], 6, 0.03);
+  T('concrete_white', 'Concrete (dyed)', B, 'dye', 'noise', [236, 236, 236], 3, 0.01);
+  T('glass_white', 'Stained glass (dyed)', B, 'dye', 'special', 'stained_glass');
+  /* wood species */
+  const WOOD = { spruce: [114, 84, 48], birch: [196, 178, 122], jungle: [160, 115, 80], acacia: [168, 90, 50], big_oak: [66, 43, 20] };
+  for (const k in WOOD) T('planks_' + k, k.replace('_', ' ') + ' planks', B, 0, 'planks', WOOD[k]);
+  const LOGC = { spruce: [58, 38, 18], birch: [216, 214, 208], jungle: [86, 68, 28], acacia: [104, 98, 88], big_oak: [40, 26, 12] };
+  for (const k in LOGC) { T('log_' + k, k.replace('_', ' ') + ' log side', B, 0, k === 'birch' ? 'birchside' : 'logside', LOGC[k]); T('log_' + k + '_top', k.replace('_', ' ') + ' log top', B, 0, 'logtop', WOOD[k], LOGC[k]); }
+  /* decor blocks */
+  T('quartz_block_side', 'Quartz side', B, 0, 'noise', [236, 232, 224], 4, 0.02);
+  T('quartz_block_top', 'Quartz top', B, 0, 'noise', [238, 234, 226], 4, 0.02);
+  T('quartz_block_chiseled', 'Chiseled quartz side', B, 0, 'special', 'quartz_chiseled');
+  T('quartz_block_lines', 'Quartz pillar side', B, 0, 'special', 'quartz_lines');
+  T('purpur_block', 'Purpur', B, 0, 'noise', [168, 120, 168], 8, 0.04);
+  T('purpur_pillar', 'Purpur pillar side', B, 0, 'special', 'purpur_pillar');
+  T('prismarine_rough', 'Prismarine', B, 0, 'blotch', [96, 156, 148], 40, 12);
+  T('prismarine_bricks', 'Prismarine bricks', B, 0, 'bricks', [98, 172, 158], [60, 110, 104]);
+  T('prismarine_dark', 'Dark prismarine', B, 0, 'noise', [50, 90, 76], 10, 0.05);
+  T('bookshelf', 'Bookshelf', B, 0, 'special', 'bookshelf');
+  T('tnt_side', 'TNT side', B, 0, 'special', 'tnt_side');
+  T('tnt_top', 'TNT top', B, 0, 'special', 'tnt_top');
+  T('tnt_bottom', 'TNT bottom', B, 0, 'special', 'tnt_top');
+  T('pumpkin_side', 'Pumpkin side', B, 0, 'special', 'pumpkin_side');
+  T('pumpkin_top', 'Pumpkin top', B, 0, 'special', 'pumpkin_top');
+  T('pumpkin_face_off', 'Carved pumpkin face', B, 0, 'special', 'pumpkin_face');
+  T('pumpkin_face_on', 'Jack o lantern face', B, 0, 'special', 'pumpkin_face_on');
+  T('melon_side', 'Melon side', B, 0, 'special', 'melon_side');
+  T('melon_top', 'Melon top', B, 0, 'special', 'melon_top');
+  T('hay_block_side', 'Hay side', B, 0, 'special', 'hay_side');
+  T('hay_block_top', 'Hay top', B, 0, 'special', 'hay_top');
+  T('bone_block_side', 'Bone block side', B, 0, 'special', 'bone_side');
+  T('bone_block_top', 'Bone block top', B, 0, 'special', 'bone_top');
+  T('sponge', 'Sponge', B, 0, 'special', 'sponge');
+  T('slime', 'Slime block', B, 0, 'special', 'slime');
+  T('noteblock', 'Note block', B, 0, 'special', 'noteblock');
+  T('jukebox_side', 'Jukebox side', B, 0, 'special', 'noteblock');
+  T('jukebox_top', 'Jukebox top', B, 0, 'special', 'jukebox_top');
+  T('farmland_dry', 'Farmland dry', B, 0, 'special', 'farmland');
+  T('farmland_wet', 'Farmland wet', B, 0, 'special', 'farmland_wet');
+  T('grass_path_top', 'Path top', B, 0, 'noise', [150, 126, 78], 16, 0.08);
+  T('grass_path_side', 'Path side', B, 0, 'special', 'path_side');
+  T('cactus_side', 'Cactus side', B, 0, 'special', 'cactus_side');
+  T('cactus_top', 'Cactus top', B, 0, 'special', 'cactus_top');
+  T('crafting_table_front', 'Crafting table front', B, 0, 'special', 'table_front');
+  T('furnace_side', 'Furnace side', B, 0, 'special', 'furnace_side');
+  T('furnace_front_on', 'Furnace front (lit)', B, 0, 'special', 'furnace_on');
+  T('enchanting_table_top', 'Enchanting table top', B, 0, 'special', 'enchant_top');
+  T('enchanting_table_side', 'Enchanting table side', B, 0, 'special', 'enchant_side');
+  T('chest_front', 'Chest front', B, 0, 'special', 'chest_front');
+  T('chest_side', 'Chest side', B, 0, 'special', 'chest_side');
+  T('chest_top', 'Chest top', B, 0, 'special', 'chest_top');
+  T('anvil_top', 'Anvil top', B, 0, 'special', 'anvil_top');
+  T('torch_on', 'Torch', B, 0, 'special', 'torch');
+  T('ladder', 'Ladder', B, 0, 'special', 'ladder');
+  T('iron_bars', 'Iron bars', B, 0, 'special', 'iron_bars');
+  T('glass_pane_top', 'Glass pane edge', B, 0, 'solid', [196, 228, 240], 6);
+  for (const s of ['wood', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'iron']) {
+    T('door_' + s + '_lower', s.replace('_', ' ') + ' door lower', B, 0, 'door', s, false);
+    T('door_' + s + '_upper', s.replace('_', ' ') + ' door upper', B, 0, 'door', s, true);
+  }
+  T('lily_pad', 'Lily pad', P, 'foliage', 'special', 'lilypad');
+  /* plants */
+  T('tallgrass', 'Tall grass', P, 'grass', 'plant', [210, 210, 210], 9, 11);
+  T('fern', 'Fern', P, 'grass', 'special', 'fern');
+  T('deadbush', 'Dead bush', P, 0, 'special', 'deadbush');
+  T('flower_dandelion', 'Dandelion', P, 0, 'flower', [250, 220, 40], [250, 160, 30], 'small');
+  T('flower_rose', 'Poppy', P, 0, 'flower', [210, 30, 30], [40, 20, 20], 'cup');
+  T('flower_blue_orchid', 'Blue orchid', P, 0, 'flower', [40, 190, 230], [220, 240, 250], 'cup');
+  T('flower_allium', 'Allium', P, 0, 'flower', [190, 110, 220], [240, 220, 250], 'ball');
+  T('flower_houstonia', 'Azure bluet', P, 0, 'flower', [236, 240, 246], [250, 220, 60], 'small');
+  T('flower_tulip_red', 'Red tulip', P, 0, 'flower', [210, 40, 30], [240, 90, 60], 'cup');
+  T('flower_tulip_orange', 'Orange tulip', P, 0, 'flower', [236, 130, 30], [250, 170, 70], 'cup');
+  T('flower_tulip_white', 'White tulip', P, 0, 'flower', [240, 240, 240], [250, 230, 200], 'cup');
+  T('flower_tulip_pink', 'Pink tulip', P, 0, 'flower', [240, 150, 190], [250, 190, 220], 'cup');
+  T('flower_oxeye_daisy', 'Oxeye daisy', P, 0, 'flower', [244, 244, 244], [250, 200, 40], 'daisy');
+  T('mushroom_brown', 'Brown mushroom', P, 0, 'special', 'mushroom_brown');
+  T('mushroom_red', 'Red mushroom', P, 0, 'special', 'mushroom_red');
+  for (const [k, c] of [['oak', [60, 130, 40]], ['spruce', [40, 90, 56]], ['birch', [90, 150, 60]], ['jungle', [50, 140, 30]], ['acacia', [96, 140, 40]], ['roofed_oak', [44, 100, 30]]]) T('sapling_' + k, k.replace('_', ' ') + ' sapling', P, 0, 'sapling', c);
+  for (const [k, lab, c] of [['grass', 'Tall grass', 0], ['fern', 'Large fern', 0], ['sunflower', 'Sunflower', [250, 210, 30]], ['syringa', 'Lilac', [190, 120, 210]], ['rose', 'Rose bush', [200, 30, 40]], ['paeonia', 'Peony', [244, 170, 200]]]) {
+    T('double_plant_' + k + '_bottom', lab + ' bottom', P, k === 'grass' || k === 'fern' ? 'grass' : 0, 'dplant', k, c, false);
+    T('double_plant_' + k + '_top', lab + ' top', P, k === 'grass' || k === 'fern' ? 'grass' : 0, 'dplant', k, c, true);
+  }
+  T('reeds', 'Sugar cane', P, 'grass', 'special', 'reeds');
+  for (let s = 0; s < 8; s++) T('wheat_stage_' + s, 'Wheat stage ' + s, P, 0, 'crop', 'wheat', s, 7);
+  for (let s = 0; s < 4; s++) T('carrots_stage_' + s, 'Carrots stage ' + s, P, 0, 'crop', 'carrot', s, 3);
+  for (let s = 0; s < 4; s++) T('potatoes_stage_' + s, 'Potatoes stage ' + s, P, 0, 'crop', 'potato', s, 3);
+  for (let s = 0; s < 4; s++) T('beetroots_stage_' + s, 'Beetroots stage ' + s, P, 0, 'crop', 'beet', s, 3);
+  /* tools: legacy wood/stone/iron already above; add gold, diamond and hoes */
+  for (const tier of ['wood', 'stone', 'iron', 'gold', 'diamond']) {
+    if (tier === 'gold' || tier === 'diamond') for (const [ty, lab] of [['pickaxe', 'pickaxe'], ['axe', 'axe'], ['sword', 'sword'], ['shovel', 'shovel']]) T(tier + '_' + ty, tier + ' ' + lab, TL, 0, 'tool', ty, tier);
+    T(tier + '_hoe', tier + ' hoe', TL, 0, 'tool', 'hoe', tier);
+  }
+  T('bow_standby', 'Bow', TL, 0, 'sprite', 'bow'); T('arrow', 'Arrow', TL, 0, 'sprite', 'arrow');
+  T('shears', 'Shears', TL, 0, 'sprite', 'shears'); T('flint_and_steel', 'Flint and steel', TL, 0, 'sprite', 'flintsteel');
+  T('saddle', 'Saddle', TL, 0, 'sprite', 'saddle');
+  T('bucket_empty', 'Bucket', TL, 0, 'sprite', 'bucket', null); T('bucket_water', 'Water bucket', TL, 0, 'sprite', 'bucket', [40, 90, 210]); T('bucket_lava', 'Lava bucket', TL, 0, 'sprite', 'bucket', [240, 110, 20]);
+  /* materials */
+  T('gold_ingot', 'Gold ingot', I, 0, 'ingot', [250, 214, 70]);
+  T('diamond', 'Diamond', I, 0, 'gem', [98, 232, 224]); T('emerald', 'Emerald', I, 0, 'gem', [60, 210, 100]);
+  T('charcoal', 'Charcoal', I, 0, 'lump', [44, 36, 30]); T('redstone_dust', 'Redstone dust', I, 0, 'dust', [200, 20, 16]);
+  T('gunpowder', 'Gunpowder', I, 0, 'dust', [92, 92, 96]); T('sugar', 'Sugar', I, 0, 'dust', [240, 240, 240]);
+  T('flint', 'Flint', I, 0, 'lump', [70, 70, 76]); T('clay_ball', 'Clay ball', I, 0, 'lump', [160, 166, 180]);
+  T('brick_item', 'Brick', I, 0, 'ingot', [170, 84, 64]); T('lapis', 'Lapis lazuli', I, 0, 'lump', [40, 70, 190]);
+  T('bone', 'Bone', I, 0, 'sprite', 'bone'); T('feather', 'Feather', I, 0, 'sprite', 'feather'); T('string', 'String', I, 0, 'sprite', 'string');
+  T('leather', 'Leather', I, 0, 'sprite', 'leather'); T('paper', 'Paper', I, 0, 'sprite', 'paper'); T('book_normal', 'Book', I, 0, 'sprite', 'book');
+  T('egg', 'Egg', I, 0, 'sprite', 'egg'); T('snowball', 'Snowball', I, 0, 'sprite', 'snowball'); T('slimeball', 'Slimeball', I, 0, 'sprite', 'slimeball');
+  T('spider_eye', 'Spider eye', I, 0, 'sprite', 'spidereye'); T('seeds_wheat', 'Seeds', I, 0, 'sprite', 'seeds'); T('wheat', 'Wheat', I, 0, 'sprite', 'wheat');
+  T('dye_powder_white', 'Dye (dyed)', I, 'dye', 'dust', [236, 236, 236]);
+  /* food */
+  T('apple', 'Apple', F, 0, 'sprite', 'apple'); T('bread', 'Bread', F, 0, 'sprite', 'bread'); T('melon', 'Melon slice', F, 0, 'sprite', 'melonslice');
+  T('carrot', 'Carrot', F, 0, 'sprite', 'carrot'); T('potato', 'Potato', F, 0, 'sprite', 'potato'); T('potato_baked', 'Baked potato', F, 0, 'sprite', 'bakedpotato'); T('beetroot', 'Beetroot', F, 0, 'sprite', 'beet');
+  T('beef_cooked', 'Steak', F, 0, 'sprite', 'meat', 'cooked'); T('porkchop_cooked', 'Cooked porkchop', F, 0, 'sprite', 'meat', 'cookedpork');
+  T('mutton_cooked', 'Cooked mutton', F, 0, 'sprite', 'meat', 'cookedmutton'); T('rabbit_raw', 'Raw rabbit', F, 0, 'sprite', 'meat', 'rabbit'); T('rabbit_cooked', 'Cooked rabbit', F, 0, 'sprite', 'meat', 'cookedrabbit');
+  T('chicken_raw', 'Raw chicken', F, 0, 'sprite', 'drumstick', false); T('chicken_cooked', 'Cooked chicken', F, 0, 'sprite', 'drumstick', true);
+  T('rotten_flesh', 'Rotten flesh', F, 0, 'sprite', 'meat', 'rotten'); T('cookie', 'Cookie', F, 0, 'sprite', 'cookie');
+})();
+const TILE_BY_NAME = {}, TIDX = {};
+for (const t of TILES) { TILE_BY_NAME[t.name] = t; TIDX[t.name] = t.t; (t.alias || []).forEach(a => { TIDX[a] = t.t; }); }
+/* Classic 16-column terrain.png indices (our tile -> source tile in an old-style atlas) */
 const CLASSIC = { 0: 0, 1: 3, 2: 2, 3: 1, 4: 18, 5: 20, 6: 21, 7: 52, 8: 4, 9: 16, 10: 205, 25: 38 };
 
 /* Mob skins. Sizes are in 1/16 block pixels. c = centre (x right, y up, z forward), s = box size,
-   uv = top-left of the box in the 64-wide skin, uvs = size used for the unwrap when different from s,
-   pv = pivot height, a0 = fixed X rotation, leg = swing direction, fur = uses the fur skin, col = default colour. */
-const H2 = Math.PI / 2;
-const SKINS = {
-  zombie: { w: 64, h: 64, label: 'Zombie', parts: [
+   uv = top-left of the box in the skin, uvs = unwrap size when different from s, pv = pivot height,
+   a0 = fixed X rotation, leg = swing sign, fur = uses the fur skin, col = default colour, n = name. */
+/* Tint defaults: [lush, dry] */
+const TINT_DEFAULT = { grass: ['#6fbf3a', '#b9b24a'], foliage: ['#4f9a2c', '#8c9a2c'] };
+
+/* ===== Mob models and skin layouts (shared by the game and the Texture Lab) =====
+   Sizes are in 1/16 block. c = box centre (x right, y up, z forward), s = box size, uv = top-left of the box's
+   unwrap in the skin, uvs = size used for the unwrap when different from s, pv = pivot height for swinging,
+   a0 = fixed X rotation (positive tips the top forward), leg = swing sign, fur = drawn from the fur skin,
+   dup = shares the UV rectangle of the part before it (a mirrored twin), col = default colour, coat = takes the
+   coat colour of the individual animal. Skins are 64 wide. */
+const SKINS = {};
+(function () {
+  const leg = (c, s, uv, col, sign, dup, extra) => Object.assign({ n: 'Leg', c, s, uv, pv: c[1] + s[1] / 2, leg: sign, col, dup }, extra || {});
+  SKINS.zombie = { w: 64, h: 64, label: 'Zombie', parts: [
     { n: 'Head', c: [0, 28, 0], s: [8, 8, 8], uv: [0, 0], pv: 28, col: [0.4, 0.64, 0.36] },
     { n: 'Body', c: [0, 18, 0], s: [8, 12, 4], uv: [16, 16], pv: 18, col: [0.2, 0.46, 0.62] },
     { n: 'Arm', c: [-6, 18, 0], s: [4, 12, 4], uv: [40, 16], pv: 24, a0: -H2, col: [0.4, 0.64, 0.36] }, { n: 'Arm', c: [6, 18, 0], s: [4, 12, 4], uv: [40, 16], pv: 24, a0: -H2, col: [0.4, 0.64, 0.36], dup: 1 },
-    { n: 'Leg', c: [-2, 6, 0], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: 1, col: [0.25, 0.23, 0.52] }, { n: 'Leg', c: [2, 6, 0], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: -1, col: [0.25, 0.23, 0.52], dup: 1 }] },
-  pig: { w: 64, h: 32, label: 'Pig', parts: [
+    leg([-2, 6, 0], [4, 12, 4], [0, 16], [0.25, 0.23, 0.52], 1), leg([2, 6, 0], [4, 12, 4], [0, 16], [0.25, 0.23, 0.52], -1, 1)] };
+  SKINS.skeleton = { w: 64, h: 32, label: 'Skeleton', parts: [
+    { n: 'Head', c: [0, 28, 0], s: [8, 8, 8], uv: [0, 0], pv: 28, col: [0.8, 0.8, 0.77] },
+    { n: 'Body', c: [0, 18, 0], s: [8, 12, 4], uv: [16, 16], pv: 18, col: [0.74, 0.74, 0.71] },
+    { n: 'Arm', c: [-5, 18, 0], s: [2, 12, 2], uv: [40, 16], pv: 24, a0: -1.35, col: [0.8, 0.8, 0.77] }, { n: 'Arm', c: [5, 18, 0], s: [2, 12, 2], uv: [40, 16], pv: 24, a0: -1.35, col: [0.8, 0.8, 0.77], dup: 1 },
+    leg([-2, 6, 0], [2, 12, 2], [0, 16], [0.7, 0.7, 0.67], 1), leg([2, 6, 0], [2, 12, 2], [0, 16], [0.7, 0.7, 0.67], -1, 1)] };
+  SKINS.creeper = { w: 64, h: 32, label: 'Creeper', parts: [
+    { n: 'Head', c: [0, 28, 0], s: [8, 8, 8], uv: [0, 0], pv: 28, col: [0.3, 0.72, 0.25] },
+    { n: 'Body', c: [0, 18, 0], s: [8, 12, 4], uv: [16, 16], pv: 18, col: [0.26, 0.64, 0.22] },
+    leg([-2, 3, 4], [4, 6, 4], [0, 16], [0.22, 0.56, 0.2], 1), leg([2, 3, 4], [4, 6, 4], [0, 16], [0.22, 0.56, 0.2], -1, 1),
+    leg([-2, 3, -4], [4, 6, 4], [0, 16], [0.22, 0.56, 0.2], -1, 1), leg([2, 3, -4], [4, 6, 4], [0, 16], [0.22, 0.56, 0.2], 1, 1)] };
+  SKINS.spider = { w: 64, h: 32, label: 'Spider', parts: [
+    { n: 'Head', c: [0, 8, 9], s: [8, 8, 8], uv: [32, 4], pv: 8, col: [0.22, 0.19, 0.17] },
+    { n: 'Thorax', c: [0, 8, 0], s: [6, 6, 6], uv: [0, 0], pv: 8, col: [0.26, 0.22, 0.2] },
+    { n: 'Abdomen', c: [0, 8, -9], s: [10, 8, 12], uv: [0, 12], pv: 8, col: [0.3, 0.24, 0.2] },
+    { n: 'Leg', c: [-10, 7, 3], s: [16, 2, 2], uv: [18, 0], pv: 7, col: [0.18, 0.15, 0.14] }, { n: 'Leg', c: [10, 7, 3], s: [16, 2, 2], uv: [18, 0], pv: 7, col: [0.18, 0.15, 0.14], dup: 1 },
+    { n: 'Leg', c: [-10, 7, 1], s: [16, 2, 2], uv: [18, 0], pv: 7, col: [0.18, 0.15, 0.14], dup: 1 }, { n: 'Leg', c: [10, 7, 1], s: [16, 2, 2], uv: [18, 0], pv: 7, col: [0.18, 0.15, 0.14], dup: 1 },
+    { n: 'Leg', c: [-10, 7, -1], s: [16, 2, 2], uv: [18, 0], pv: 7, col: [0.18, 0.15, 0.14], dup: 1 }, { n: 'Leg', c: [10, 7, -1], s: [16, 2, 2], uv: [18, 0], pv: 7, col: [0.18, 0.15, 0.14], dup: 1 },
+    { n: 'Leg', c: [-10, 7, -3], s: [16, 2, 2], uv: [18, 0], pv: 7, col: [0.18, 0.15, 0.14], dup: 1 }, { n: 'Leg', c: [10, 7, -3], s: [16, 2, 2], uv: [18, 0], pv: 7, col: [0.18, 0.15, 0.14], dup: 1 }] };
+  SKINS.pig = { w: 64, h: 32, label: 'Pig', parts: [
     { n: 'Head', c: [0, 11, 11], s: [8, 8, 8], uv: [0, 0], pv: 11, col: [0.96, 0.66, 0.66] },
     { n: 'Snout', c: [0, 10, 15.5], s: [4, 3, 1], uv: [16, 16], pv: 10, col: [0.86, 0.5, 0.52] },
     { n: 'Body', c: [0, 10, 0], s: [10, 16, 8], uv: [28, 8], pv: 10, a0: -H2, col: [0.95, 0.62, 0.62] },
-    { n: 'Leg', c: [-3, 3, 5], s: [4, 6, 4], uv: [0, 16], pv: 6, leg: 1, col: [0.88, 0.55, 0.56] }, { n: 'Leg', c: [3, 3, 5], s: [4, 6, 4], uv: [0, 16], pv: 6, leg: -1, col: [0.88, 0.55, 0.56], dup: 1 },
-    { n: 'Leg', c: [-3, 3, -5], s: [4, 6, 4], uv: [0, 16], pv: 6, leg: -1, col: [0.88, 0.55, 0.56], dup: 1 }, { n: 'Leg', c: [3, 3, -5], s: [4, 6, 4], uv: [0, 16], pv: 6, leg: 1, col: [0.88, 0.55, 0.56], dup: 1 }] },
-  sheep: { w: 64, h: 32, label: 'Sheep', parts: [
+    leg([-3, 3, 5], [4, 6, 4], [0, 16], [0.88, 0.55, 0.56], 1), leg([3, 3, 5], [4, 6, 4], [0, 16], [0.88, 0.55, 0.56], -1, 1),
+    leg([-3, 3, -5], [4, 6, 4], [0, 16], [0.88, 0.55, 0.56], -1, 1), leg([3, 3, -5], [4, 6, 4], [0, 16], [0.88, 0.55, 0.56], 1, 1)] };
+  SKINS.sheep = { w: 64, h: 32, label: 'Sheep', parts: [
     { n: 'Head', c: [0, 19, 10], s: [6, 6, 8], uv: [0, 0], pv: 19, col: [0.4, 0.34, 0.3] },
+    { n: 'Body', c: [0, 16, 0], s: [8, 16, 6], uv: [28, 8], pv: 16, a0: -H2, col: [0.86, 0.72, 0.64] },
     { n: 'Body (fur layer)', c: [0, 16, 0], s: [11.5, 19.5, 9.5], uvs: [8, 16, 6], uv: [28, 8], pv: 16, a0: -H2, fur: 1, col: [0.92, 0.92, 0.88] },
-    { n: 'Leg', c: [-3, 6, 5], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: 1, col: [0.4, 0.34, 0.3] }, { n: 'Leg', c: [3, 6, 5], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: -1, col: [0.4, 0.34, 0.3], dup: 1 },
-    { n: 'Leg', c: [-3, 6, -5], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: -1, col: [0.4, 0.34, 0.3], dup: 1 }, { n: 'Leg', c: [3, 6, -5], s: [4, 12, 4], uv: [0, 16], pv: 12, leg: 1, col: [0.4, 0.34, 0.3], dup: 1 }] },
-  sheep_fur: { w: 64, h: 32, label: 'Sheep fur', parts: [] },
+    leg([-3, 6, 5], [4, 12, 4], [0, 16], [0.4, 0.34, 0.3], 1), leg([3, 6, 5], [4, 12, 4], [0, 16], [0.4, 0.34, 0.3], -1, 1),
+    leg([-3, 6, -5], [4, 12, 4], [0, 16], [0.4, 0.34, 0.3], -1, 1), leg([3, 6, -5], [4, 12, 4], [0, 16], [0.4, 0.34, 0.3], 1, 1)] };
+  SKINS.sheep_fur = { w: 64, h: 32, label: 'Sheep fur', parts: [] };
+  SKINS.cow = { w: 64, h: 32, label: 'Cow', parts: [
+    { n: 'Head', c: [0, 21, 11], s: [8, 8, 6], uv: [0, 0], pv: 21, col: [0.32, 0.22, 0.16] },
+    { n: 'Horn', c: [-4.5, 26.5, 10], s: [1, 3, 1], uv: [22, 0], pv: 26, col: [0.9, 0.88, 0.8] }, { n: 'Horn', c: [4.5, 26.5, 10], s: [1, 3, 1], uv: [22, 0], pv: 26, col: [0.9, 0.88, 0.8], dup: 1 },
+    { n: 'Body', c: [0, 17, 0], s: [12, 18, 10], uv: [18, 4], pv: 17, a0: -H2, col: [0.3, 0.2, 0.15] },
+    leg([-4, 6, 7], [4, 12, 4], [0, 16], [0.27, 0.18, 0.14], 1), leg([4, 6, 7], [4, 12, 4], [0, 16], [0.27, 0.18, 0.14], -1, 1),
+    leg([-4, 6, -7], [4, 12, 4], [0, 16], [0.27, 0.18, 0.14], -1, 1), leg([4, 6, -7], [4, 12, 4], [0, 16], [0.27, 0.18, 0.14], 1, 1)] };
+  SKINS.chicken = { w: 64, h: 32, label: 'Chicken', parts: [
+    { n: 'Head', c: [0, 12, 4], s: [4, 6, 3], uv: [0, 0], pv: 12, col: [0.95, 0.95, 0.93] },
+    { n: 'Beak', c: [0, 11, 6.5], s: [4, 2, 2], uv: [14, 0], pv: 11, col: [0.95, 0.7, 0.2] },
+    { n: 'Wattle', c: [0, 9.5, 6], s: [2, 2, 1], uv: [14, 4], pv: 9, col: [0.8, 0.2, 0.18] },
+    { n: 'Body', c: [0, 8, 0], s: [6, 8, 6], uv: [0, 9], pv: 8, a0: -H2, col: [0.95, 0.95, 0.93] },
+    { n: 'Wing', c: [-3.5, 9, 0], s: [1, 4, 6], uv: [24, 13], pv: 11, col: [0.9, 0.9, 0.88] }, { n: 'Wing', c: [3.5, 9, 0], s: [1, 4, 6], uv: [24, 13], pv: 11, col: [0.9, 0.9, 0.88], dup: 1 },
+    leg([-1.5, 2.5, 0], [3, 5, 3], [26, 0], [0.95, 0.7, 0.2], 1), leg([1.5, 2.5, 0], [3, 5, 3], [26, 0], [0.95, 0.7, 0.2], -1, 1)] };
+  SKINS.horse = { w: 64, h: 64, label: 'Horse', parts: [
+    { n: 'Body', c: [0, 25, 0], s: [10, 10, 24], uvs: [10, 10, 22], uv: [0, 34], pv: 25, col: [0.55, 0.35, 0.2], coat: 1 },
+    { n: 'Neck', c: [0, 34, 10], s: [4, 12, 7], uv: [0, 14], pv: 28, a0: 0.5, col: [0.55, 0.35, 0.2], coat: 1 },
+    { n: 'Head', c: [0, 38, 19.5], s: [5, 5, 8], uv: [0, 0], pv: 38, a0: 0.35, col: [0.52, 0.33, 0.19], coat: 1 },
+    { n: 'Ear', c: [-1.8, 42.5, 16], s: [2, 3, 1], uv: [28, 0], pv: 42, col: [0.5, 0.31, 0.18], coat: 1 }, { n: 'Ear', c: [1.8, 42.5, 16], s: [2, 3, 1], uv: [28, 0], pv: 42, col: [0.5, 0.31, 0.18], coat: 1, dup: 1 },
+    { n: 'Tail', c: [0, 24, -13], s: [2, 10, 2], uv: [44, 0], pv: 29, a0: 0.3, col: [0.18, 0.12, 0.08] },
+    leg([-3, 10, 9], [4, 20, 4], [48, 16], [0.5, 0.31, 0.18], 1, 0, { coat: 1 }), leg([3, 10, 9], [4, 20, 4], [48, 16], [0.5, 0.31, 0.18], -1, 1, { coat: 1 }),
+    leg([-3, 10, -9], [4, 20, 4], [48, 16], [0.5, 0.31, 0.18], -1, 1, { coat: 1 }), leg([3, 10, -9], [4, 20, 4], [48, 16], [0.5, 0.31, 0.18], 1, 1, { coat: 1 })] };
+  SKINS.rabbit = { w: 64, h: 32, label: 'Rabbit', parts: [
+    { n: 'Body', c: [0, 5, 0], s: [6, 5, 10], uv: [0, 0], pv: 5, col: [0.62, 0.5, 0.36], coat: 1 },
+    { n: 'Head', c: [0, 8, 6], s: [5, 4, 5], uv: [32, 0], pv: 8, col: [0.6, 0.48, 0.34], coat: 1 },
+    { n: 'Ear', c: [-1.5, 12.5, 5.5], s: [2, 5, 1], uv: [52, 0], pv: 12, col: [0.58, 0.46, 0.33], coat: 1 }, { n: 'Ear', c: [1.5, 12.5, 5.5], s: [2, 5, 1], uv: [52, 0], pv: 12, col: [0.58, 0.46, 0.33], coat: 1, dup: 1 },
+    leg([-3, 2.5, -3], [2, 5, 4], [0, 16], [0.56, 0.44, 0.32], 1, 0, { coat: 1 }), leg([3, 2.5, -3], [2, 5, 4], [0, 16], [0.56, 0.44, 0.32], 1, 1, { coat: 1 }),
+    leg([-2, 2, 4], [2, 4, 2], [14, 16], [0.56, 0.44, 0.32], -1, 0, { coat: 1 }), leg([2, 2, 4], [2, 4, 2], [14, 16], [0.56, 0.44, 0.32], -1, 1, { coat: 1 }),
+    { n: 'Tail', c: [0, 6, -6], s: [3, 3, 2], uv: [24, 16], pv: 6, col: [0.95, 0.95, 0.92] }] };
+  SKINS.wolf = { w: 64, h: 32, label: 'Wolf', parts: [
+    { n: 'Head', c: [0, 12, 6.5], s: [6, 6, 4], uv: [0, 0], pv: 12, col: [0.82, 0.8, 0.78] },
+    { n: 'Snout', c: [0, 11, 10], s: [3, 3, 3], uv: [0, 10], pv: 11, col: [0.78, 0.76, 0.74] },
+    { n: 'Ear', c: [-2, 16, 5.5], s: [2, 2, 1], uv: [22, 0], pv: 16, col: [0.75, 0.73, 0.71] }, { n: 'Ear', c: [2, 16, 5.5], s: [2, 2, 1], uv: [22, 0], pv: 16, col: [0.75, 0.73, 0.71], dup: 1 },
+    { n: 'Body', c: [0, 10, 0], s: [6, 9, 6], uv: [18, 14], pv: 10, a0: -H2, col: [0.8, 0.78, 0.76] },
+    { n: 'Tail', c: [0, 11, -6.5], s: [2, 8, 2], uv: [9, 18], pv: 14, a0: 0.9, col: [0.78, 0.76, 0.74] },
+    leg([-2.5, 4, 3.5], [2, 8, 2], [0, 18], [0.76, 0.74, 0.72], 1), leg([2.5, 4, 3.5], [2, 8, 2], [0, 18], [0.76, 0.74, 0.72], -1, 1),
+    leg([-2.5, 4, -3.5], [2, 8, 2], [0, 18], [0.76, 0.74, 0.72], -1, 1), leg([2.5, 4, -3.5], [2, 8, 2], [0, 18], [0.76, 0.74, 0.72], 1, 1)] };
+  SKINS.villager = { w: 64, h: 64, label: 'Villager', parts: [
+    { n: 'Head', c: [0, 29, 0], s: [8, 10, 8], uv: [0, 0], pv: 29, col: [0.76, 0.58, 0.46] },
+    { n: 'Nose', c: [0, 27, 5], s: [2, 4, 2], uv: [32, 0], pv: 27, col: [0.7, 0.5, 0.4] },
+    { n: 'Body', c: [0, 19, 0], s: [8, 12, 6], uv: [16, 20], pv: 19, col: [0.5, 0.36, 0.24] },
+    { n: 'Robe', c: [0, 15, 0], s: [8.6, 18, 6.6], uvs: [8, 18, 6], uv: [0, 38], pv: 15, col: [0.45, 0.32, 0.2] },
+    { n: 'Arms', c: [0, 20, 3.5], s: [8, 4, 4], uv: [44, 22], pv: 20, col: [0.46, 0.33, 0.22] },
+    leg([-2, 6, 0], [4, 12, 4], [0, 22], [0.4, 0.3, 0.2], 1), leg([2, 6, 0], [4, 12, 4], [0, 22], [0.4, 0.3, 0.2], -1, 1)] };
+})();
+/* gameplay stats; w/h are the collision box in blocks */
+const MOBS = {
+  zombie: { w: 0.3, h: 1.8, hp: 20, spd: 2.5, kind: 'hostile', label: 'Zombie' },
+  skeleton: { w: 0.3, h: 1.8, hp: 20, spd: 2.3, kind: 'hostile', label: 'Skeleton' },
+  creeper: { w: 0.3, h: 1.7, hp: 20, spd: 2.3, kind: 'hostile', label: 'Creeper' },
+  spider: { w: 0.7, h: 0.9, hp: 16, spd: 3.4, kind: 'neutral', label: 'Spider' },
+  pig: { w: 0.45, h: 0.9, hp: 10, spd: 1.4, kind: 'passive', label: 'Pig' },
+  sheep: { w: 0.45, h: 1.3, hp: 8, spd: 1.3, kind: 'passive', label: 'Sheep' },
+  cow: { w: 0.45, h: 1.4, hp: 10, spd: 1.3, kind: 'passive', label: 'Cow' },
+  chicken: { w: 0.2, h: 0.7, hp: 4, spd: 1.2, kind: 'passive', label: 'Chicken' },
+  horse: { w: 0.65, h: 1.6, hp: 24, spd: 1.6, kind: 'passive', label: 'Horse' },
+  rabbit: { w: 0.25, h: 0.5, hp: 3, spd: 1.6, kind: 'passive', label: 'Rabbit' },
+  wolf: { w: 0.3, h: 0.85, hp: 8, spd: 2.8, kind: 'neutral', label: 'Wolf' },
+  villager: { w: 0.3, h: 1.8, hp: 20, spd: 1.2, kind: 'passive', label: 'Villager' },
 };
-/* Default tint colours for biome-coloured layers (lush end and dry end) */
-const TINT_DEFAULT = { grass: ['#7cbd4a', '#b9b24a'], foliage: ['#4f9a2c', '#8c9a2c'] };
+const COATS = {
+  horse: [[0.55, 0.35, 0.2], [0.6, 0.28, 0.16], [0.14, 0.12, 0.12], [0.93, 0.92, 0.9], [0.55, 0.55, 0.56], [0.78, 0.65, 0.45]],
+  rabbit: [[0.62, 0.5, 0.36], [0.92, 0.92, 0.9], [0.2, 0.17, 0.15], [0.7, 0.6, 0.4]],
+};
+
+/* names a texture pack may use for each skin (file base names, lowercase) */
+const SKIN_ALIASES = {
+  zombie: ['zombie'], skeleton: ['skeleton'], creeper: ['creeper'], spider: ['spider'], pig: ['pig'], sheep: ['sheep'], sheep_fur: ['sheep_fur'], cow: ['cow'], chicken: ['chicken'],
+  horse: ['horse', 'horse_brown', 'horse_chestnut', 'horse_white', 'horse_black', 'horse_gray', 'horse_creamy'], rabbit: ['rabbit', 'rabbit_brown', 'brown', 'rabbit_white'], wolf: ['wolf'], villager: ['villager', 'farmer', 'villager_farmer'],
+};
+const SKIN_BY_NAME = {}; for (const k in SKIN_ALIASES) for (const a of SKIN_ALIASES[k]) SKIN_BY_NAME[a] = k;
 
 /* Shared zip helpers (stored + deflate read, stored write). Used by the game and the Texture Lab. */
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -230,7 +509,7 @@ async function unzipFiles(file) {
     const lo = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true); let data = new Uint8Array(buf, lo, csz);
     if (method === 8) { try { data = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()); } catch (er) { continue; } }
     else if (method !== 0) continue;
-    out.push(new File([data], name.split('/').pop(), { type: /json$/i.test(name) ? 'application/json' : 'image/png' }));
+    { const f = new File([data], name.split('/').pop(), { type: /json$/i.test(name) ? 'application/json' : 'image/png' }); f.path = name; out.push(f); }
   }
   return out;
 }
@@ -239,12 +518,12 @@ const baseName = f => f.name.toLowerCase().replace(/\.[a-z]+$/, '').replace(/[ -
 
 /* ---------- procedural texture atlas (original pixel art, generated at load) ---------- */
 function makeAtlas() {
-  const cv = document.createElement('canvas'); cv.width = cv.height = 256;
-  const g = cv.getContext('2d'), img = g.createImageData(256, 256), d = img.data, rnd = mulberry32(90210);
+  const cv = document.createElement('canvas'); cv.width = cv.height = ATLAS_PX;
+  const g = cv.getContext('2d'), img = g.createImageData(ATLAS_PX, ATLAS_PX), d = img.data, rnd = mulberry32(90210);
   const clamp = v => v < 0 ? 0 : v > 255 ? 255 : v | 0;
   function fill(t, fn) {
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-      const c = fn(x, y), i = (((t / 16) | 0) * 16 + y) * 1024 + ((t % 16) * 16 + x) * 4;
+      const c = fn(x, y), i = (((t / ATLAS_COLS) | 0) * 16 + y) * (ATLAS_PX * 4) + ((t % ATLAS_COLS) * 16 + x) * 4;
       d[i] = clamp(c[0]); d[i + 1] = clamp(c[1]); d[i + 2] = clamp(c[2]); d[i + 3] = c[3] === undefined ? 255 : c[3];
     }
   }
@@ -273,8 +552,8 @@ function makeAtlas() {
   fill(11, (x, y) => { for (const b of blobs) if (Math.hypot(x - b[0], y - b[1]) < b[2]) return jit([36, 36, 40], 10); const bn = vnoise(x * 0.45 + 40, y * 0.45, 5) * 36; return jit([138 - bn, 138 - bn, 140 - bn], 12); });
   fill(12, (x, y) => { const b = vnoise(x * 0.6, y * 0.6, 3) * 50; return jit([70 - b * 0.5, 70 - b * 0.5, 74 - b * 0.5], 16); });
   fill(13, (x, y) => { const edge = x === 0 || y === 0 || x === 15 || y === 15; if (edge) return [196, 228, 240, 235]; if ((x === 3 && y === 3) || (x === 4 && y === 4) || (x === 3 && y === 5) || (x === 5 && y === 3)) return [255, 255, 255, 190]; return [200, 235, 250, 40]; });
-  const px = (t, pts, col) => { for (const p of pts) { if (p[0] < 0 || p[0] > 15 || p[1] < 0 || p[1] > 15) continue; const i = (((t / 16) | 0) * 16 + p[1]) * 1024 + ((t % 16) * 16 + p[0]) * 4; d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255; } };
-  const clr = t => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) d[(((t / 16) | 0) * 16 + y) * 1024 + ((t % 16) * 16 + x) * 4 + 3] = 0; };
+  const px = (t, pts, col) => { for (const p of pts) { if (p[0] < 0 || p[0] > 15 || p[1] < 0 || p[1] > 15) continue; const i = (((t / ATLAS_COLS) | 0) * 16 + p[1]) * (ATLAS_PX * 4) + ((t % ATLAS_COLS) * 16 + p[0]) * 4; d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255; } };
+  const clr = t => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) d[(((t / ATLAS_COLS) | 0) * 16 + y) * (ATLAS_PX * 4) + ((t % ATLAS_COLS) * 16 + x) * 4 + 3] = 0; };
   const stoneBase = (x, y) => { const b = vnoise(x * 0.45 + 40, y * 0.45, 5) * 36; return jit([138 - b, 138 - b, 140 - b], 12); };
   fill(15, (x, y) => { for (const b of blobs) if (Math.hypot(x - b[0], y - b[1]) < b[2]) return jit([214, 168, 140], 10); return stoneBase(x, y); });
   fill(16, (x, y) => { const c = jit([178, 140, 84], 9); if (x % 5 === 0 || y % 5 === 0) return [c[0] - 70, c[1] - 62, c[2] - 50]; return c; });
@@ -300,10 +579,210 @@ function makeAtlas() {
     }
   }
   fill(14, (x, y) => { const dx = x - 7.5, dy = y - 8; if (dx * dx / 42 + dy * dy / 26 > 1) return [0, 0, 0, 0]; if (x > 11 && y < 6 && dx * dx / 4 + (dy + 4) * (dy + 4) / 4 < 2) return [235, 230, 215]; return jit(dy < -1 ? [200, 90, 90] : [225, 130, 120], 14); });
+  /* generated slots */
+  for (const tt of TILES) if (tt.spec) paintSpec(d, tt.t, tt.spec);
   g.putImageData(img, 0, 0);
   return cv;
 }
 
+
+/* ===================== generated tile painters ===================== */
+const TOOLC = { wood: [150, 110, 60], stone: [140, 140, 144], iron: [226, 226, 232], gold: [250, 214, 70], diamond: [98, 232, 224] };
+function tileBuf() {
+  const a = new Uint8ClampedArray(1024), b = {
+    a,
+    set(x, y, c) { x |= 0; y |= 0; if (x < 0 || y < 0 || x > 15 || y > 15 || !c) return; const i = (y * 16 + x) * 4; a[i] = c[0]; a[i + 1] = c[1]; a[i + 2] = c[2]; a[i + 3] = c[3] === undefined ? 255 : c[3]; },
+    get(x, y) { const i = (y * 16 + x) * 4; return [a[i], a[i + 1], a[i + 2], a[i + 3]]; },
+    fill(fn) { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const c = fn(x, y); if (c) b.set(x, y, c); } },
+    rect(x0, y0, x1, y1, c) { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) b.set(x, y, c); },
+    line(x0, y0, x1, y1, c) { const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1); for (let i = 0; i <= n; i++) b.set(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), c); },
+    disc(cx, cy, r, c) { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (Math.hypot(x - cx, y - cy) <= r) b.set(x, y, c); },
+    ell(cx, cy, rx, ry, c) { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1) b.set(x, y, c); },
+  };
+  return b;
+}
+const sh = (c, k) => [Math.max(0, Math.min(255, c[0] * k)), Math.max(0, Math.min(255, c[1] * k)), Math.max(0, Math.min(255, c[2] * k))];
+const JT = (r, c, v) => { const n = (r() - 0.5) * 2 * v; return [c[0] + n, c[1] + n, c[2] + n]; };
+function cobbleFn(b, r, moss) {
+  const pts = []; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) pts.push([i * 4 + 2 + (r() - 0.5) * 3, j * 4 + 2 + (r() - 0.5) * 3, 112 + r() * 44]);
+  const o = r() * 40;
+  b.fill((x, y) => {
+    let d1 = 99, d2 = 99, tone = 130;
+    for (const p of pts) for (const ox of [-16, 0, 16]) for (const oy of [-16, 0, 16]) { const dd = Math.hypot(x - p[0] - ox, y - p[1] - oy); if (dd < d1) { d2 = d1; d1 = dd; tone = p[2]; } else if (dd < d2) d2 = dd; }
+    if (d2 - d1 < 1.1) return [62, 62, 64];
+    const n = (r() - 0.5) * 14; let c = [tone + n, tone + n, tone + 4 + n];
+    if (moss && vnoise(x * 0.5 + o, y * 0.5, 31) > 0.55) c = [c[0] * 0.5, c[1] * 0.85, c[2] * 0.4];
+    return c;
+  });
+}
+const KP = {
+  noise(b, r, c, v = 14, dk = 0.06) { b.fill(() => { let q = JT(r, c, v); if (r() < dk) q = [q[0] - 26, q[1] - 26, q[2] - 26]; return q; }); },
+  solid(b, r, c, v = 3) { b.fill(() => JT(r, c, v)); },
+  blotch(b, r, c, k = 36, v = 10) { const o = r() * 50; b.fill((x, y) => { const n = vnoise(x * 0.45 + o, y * 0.45, 5) * k - k / 2; return JT(r, [c[0] - n, c[1] - n, c[2] - n], v); }); },
+  gravel(b, r) { const o = r() * 90; b.fill((x, y) => { const t = vnoise(x * 0.8 + o, y * 0.8, 17); const base = t > 0.6 ? 168 : t > 0.35 ? 134 : 108; const n = (r() - 0.5) * 14; return [base + n, base - 4 + n, base - 6 + n]; }); },
+  sandstone(b, r, c, mode) {
+    b.fill(() => JT(r, c, 9));
+    if (mode === 'side' || mode === 'carved') { const dk = sh(c, 0.82); for (let x = 0; x < 16; x++) { b.set(x, 3, dk); b.set(x, 12, dk); } if (mode === 'carved') { for (let x = 2; x < 14; x++) { b.set(x, 6, dk); b.set(x, 9, dk); } for (let y = 6; y <= 9; y++) { b.set(2, y, dk); b.set(13, y, dk); } for (let x = 5; x < 11; x++) b.set(x, 7 + (x % 2), sh(c, 0.7)); } }
+  },
+  cobble(b, r, moss) { cobbleFn(b, r, moss); },
+  stonebrick(b, r, mode) {
+    const base = [128, 128, 130];
+    b.fill((x, y) => { const row = y >> 3, off = row ? 4 : 0; if (y % 8 === 7 || (x + off) % 8 === 7) return [88, 88, 92]; return JT(r, base, 8); });
+    if (mode === 'mossy') { const o = r() * 40; b.fill((x, y) => vnoise(x * 0.5 + o, y * 0.5, 41) > 0.56 ? (() => { const c = b.get(x, y); return [c[0] * 0.55, c[1] * 0.9, c[2] * 0.45]; })() : null); }
+    if (mode === 'cracked') { b.line(3, 1, 6, 5, [70, 70, 74]); b.line(6, 5, 5, 8, [70, 70, 74]); b.line(11, 9, 13, 13, [70, 70, 74]); b.line(10, 2, 12, 5, [70, 70, 74]); }
+    if (mode === 'carved') { b.fill((x, y) => (x === 1 || x === 14 || y === 1 || y === 14) ? [96, 96, 100] : (x > 3 && x < 12 && y > 3 && y < 12 ? JT(r, [142, 142, 146], 5) : JT(r, base, 6))); b.rect(6, 6, 9, 9, [100, 100, 106]); }
+  },
+  bricks(b, r, c, m) { b.fill((x, y) => { const row = y >> 2, off = row & 1 ? 4 : 0; if (y % 4 === 3 || (x + off) % 8 === 7) return JT(r, m, 6); return JT(r, c, 12); }); },
+  planks(b, r, c) { b.fill((x, y) => { const seam = y % 4 === 3, vs = x === (((y >> 2) & 1) ? 4 : 11); const q = JT(r, c, 9); return seam || vs ? sh(q, 0.78) : q; }); },
+  logside(b, r, c) { const st = []; for (let x = 0; x < 16; x++) st.push((r() - 0.5) * 30); b.fill((x) => JT(r, [c[0] + st[x], c[1] + st[x] * 0.8, c[2] + st[x] * 0.5], 8)); },
+  birchside(b, r, c) { b.fill(() => JT(r, c, 9)); for (let i = 0; i < 7; i++) { const x = (r() * 12) | 0, y = (r() * 15) | 0, w = 2 + (r() * 3 | 0); for (let k = 0; k < w; k++) b.set(x + k, y, [40, 38, 36]); } },
+  logtop(b, r, planks, bark) { b.fill((x, y) => { const e = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); if (e > 6.6) return JT(r, bark, 6); const k = Math.floor(Math.hypot(x - 7.5, y - 7.5)) % 3; return JT(r, k === 0 ? sh(planks, 1.1) : k === 1 ? sh(planks, 0.88) : planks, 6); }); },
+  ore(b, r, dot, n) { KP.blotch(b, r, [138, 138, 140], 36, 12); for (let i = 0; i < n; i++) { const cx = 1.5 + r() * 13, cy = 1.5 + r() * 13, rr = 0.9 + r() * 1.1; b.disc(cx, cy, rr, JT(r, dot, 16)); } },
+  metal(b, r, c) { b.fill((x, y) => { const e = Math.min(x, y, 15 - x, 15 - y); let q = JT(r, c, 6); if (e === 0) return x + y < 15 ? sh(c, 1.18) : sh(c, 0.72); if (e === 1) return x + y < 15 ? sh(c, 1.06) : sh(c, 0.84); if ((x + y) % 9 === 0) q = sh(q, 1.1); return q; }); },
+  wool(b, r) { b.fill((x, y) => { let q = JT(r, [226, 226, 226], 10); if ((x + y * 2) % 5 === 0) q = sh(q, 1.08); if (r() < 0.12) q = sh(q, 0.88); return q; }); },
+  plant(b, r, c, n, h) { for (let i = 0; i < n; i++) { const x = (r() * 15) | 0, hh = 4 + ((r() * (h - 3)) | 0), lean = r() < 0.5 ? -1 : 1, col = JT(r, c, 18); for (let k = 0; k < hh; k++) { b.set(x + (k > hh * 0.6 ? lean : 0), 15 - k, col); } } },
+  sapling(b, r, c) { b.line(7, 15, 7, 8, [110, 80, 44]); for (const [x, y] of [[5, 7], [6, 6], [7, 5], [8, 6], [9, 7], [6, 8], [8, 8], [7, 7], [4, 9], [10, 9], [7, 3], [6, 4], [8, 4]]) b.set(x, y, JT(r, c, 12)); },
+  flower(b, r, petal, center, shape) {
+    b.line(7, 15, 7, 8, [64, 140, 44]); b.set(6, 12, [64, 140, 44]); b.set(8, 11, [64, 140, 44]); b.set(6, 13, [50, 120, 36]);
+    if (shape === 'small') { b.rect(6, 5, 8, 7, petal); b.set(7, 6, center); b.set(7, 4, petal); b.set(5, 6, petal); b.set(9, 6, petal); b.set(7, 8, petal); }
+    else if (shape === 'cup') { b.rect(5, 4, 9, 7, petal); b.rect(6, 3, 8, 3, petal); b.set(7, 8, petal); b.set(7, 5, center); b.set(6, 4, sh(petal, 0.8)); b.set(8, 6, sh(petal, 1.1)); }
+    else if (shape === 'ball') { b.disc(7, 5, 2.8, petal); b.set(6, 4, center); b.set(8, 6, sh(petal, 0.8)); b.set(5, 6, center); b.set(9, 4, center); }
+    else { for (const [x, y] of [[7, 3], [7, 7], [5, 5], [9, 5], [5, 3], [9, 3], [5, 7], [9, 7]]) b.set(x, y, petal); b.disc(7, 5, 1.2, center); }
+  },
+  dplant(b, r, kind, col, top) {
+    if (kind === 'grass') { KP.plant(b, r, [210, 210, 210], 12, top ? 16 : 16); return; }
+    if (kind === 'fern') { for (let k = 0; k < 16; k++) { b.set(7 + (k % 3 === 0 ? 1 : 0), k, [200, 200, 200]); } for (let k = 1; k < 16; k += 2) { const w = Math.min(k, 16 - k, 5); for (let i = 1; i <= w; i++) { b.set(7 - i, k + (i > 2 ? 1 : 0), JT(r, [196, 196, 196], 14)); b.set(8 + i, k + (i > 2 ? 1 : 0), JT(r, [196, 196, 196], 14)); } } return; }
+    const g = [58, 134, 40];
+    b.line(7, 0, 7, 15, g); b.line(8, 0, 8, 15, sh(g, 0.85));
+    for (let k = 2; k < 15; k += 4) { b.set(5, k + 1, g); b.set(6, k, g); b.set(9, k + 2, g); b.set(10, k + 1, g); }
+    if (top) {
+      if (kind === 'sunflower') { b.disc(8, 4, 4.4, [250, 204, 30]); b.disc(8, 4, 2.2, [96, 62, 24]); }
+      else if (kind === 'rose') { for (const [cx, cy] of [[5, 5], [10, 3], [7, 8], [11, 7]]) { b.disc(cx, cy, 1.6, col); b.set(cx, cy, sh(col, 0.7)); } }
+      else { for (let i = 0; i < 12; i++) b.set(5 + ((r() * 7) | 0), 1 + ((r() * 9) | 0), JT(r, col, 14)); b.disc(7, 4, 2, col); }
+    }
+  },
+  crop(b, r, kind, s, max) {
+    const f = s / max;
+    if (kind === 'wheat') { const h = 3 + Math.round(f * 11), c = f > 0.99 ? [196, 170, 80] : [64 + 110 * f, 140 + 20 * f, 44 + 30 * f]; for (const x of [1, 3, 5, 7, 9, 11, 13]) { for (let k = 0; k < h - ((x * 7) % 3); k++) b.set(x + (k > h - 4 ? 1 : 0), 15 - k, JT(r, c, 14)); if (f > 0.99) b.set(x + 1, 15 - h + 1, [214, 186, 90]); } }
+    else if (kind === 'carrot') { const h = 4 + s * 3; for (const x of [2, 5, 8, 11, 14]) for (let k = 0; k < h; k++) b.set(x + (k % 2), 15 - k, JT(r, [64, 148, 48], 14)); if (s === max) for (const x of [3, 7, 11]) { b.set(x, 15, [236, 130, 30]); b.set(x, 14, [236, 130, 30]); } }
+    else if (kind === 'potato') { const h = 4 + s * 2; for (const x of [2, 5, 8, 11, 14]) for (let k = 0; k < h; k++) b.set(x + (k % 2), 15 - k, JT(r, [60, 140, 46], 14)); if (s === max) for (const x of [3, 7, 11]) b.set(x, 15, [214, 170, 90]); }
+    else { const h = 4 + s * 3; for (const x of [2, 5, 8, 11, 14]) for (let k = 0; k < h; k++) b.set(x + (k % 2), 15 - k, JT(r, [70, 130, 52], 14)); if (s === max) for (const x of [3, 8, 12]) { b.set(x, 15, [150, 20, 40]); b.set(x, 14, [150, 20, 40]); } }
+  },
+  tool(b, r, type, tier) {
+    const hc = TOOLC[tier], lt = sh(hc, 1.15), H = [112, 80, 44];
+    const handle = a => { for (let i = a; i < 12; i++) b.set(i, 15 - i, H); };
+    if (type === 'sword') { for (let i = 5; i < 15; i++) { b.set(i, 15 - i, hc); b.set(i - 1, 15 - i, hc); } b.set(7, 7, lt); b.set(8, 6, lt); b.set(9, 5, lt); b.set(10, 4, lt); for (const [x, y] of [[3, 8], [4, 9], [5, 10], [6, 11], [7, 12], [4, 8], [6, 10]]) b.set(x, y, H); handle(1); b.set(3, 12, H); b.set(2, 13, H); return; }
+    handle(1);
+    const pts = { pickaxe: [[5, 4], [6, 3], [7, 2], [8, 2], [9, 2], [10, 3], [11, 4], [12, 5], [12, 6], [4, 5], [4, 6], [5, 5], [6, 4], [11, 5]], axe: [[8, 2], [9, 2], [10, 2], [8, 3], [9, 3], [10, 3], [11, 3], [9, 4], [10, 4], [11, 4], [12, 4], [10, 5], [11, 5], [8, 4], [7, 3]], shovel: [[11, 1], [12, 1], [10, 2], [11, 2], [12, 2], [13, 2], [10, 3], [11, 3], [12, 3], [13, 3], [11, 4], [12, 4], [9, 4]], hoe: [[8, 3], [9, 2], [10, 2], [11, 2], [12, 2], [8, 4], [9, 4], [12, 3]] }[type];
+    for (const p of pts) b.set(p[0], p[1], hc);
+  },
+  ingot(b, r, c) { b.fill((x, y) => { const sx = x - y * 0.4; if (y < 5 || y > 11 || x < 3 || x > 13 || sx < 1 || sx > 11) return null; return y < 7 ? sh(c, 1.18) : JT(r, c, 8); }); },
+  gem(b, r, c) { const rows = [[7, 8], [5, 10], [3, 12], [3, 12], [4, 11], [5, 10], [6, 9], [7, 8]]; rows.forEach((s, i) => { for (let x = s[0]; x <= s[1]; x++) b.set(x, 3 + i, i < 3 ? sh(c, 1.2) : i < 5 ? c : sh(c, 0.82)); }); b.set(6, 5, [255, 255, 255]); b.set(7, 4, [255, 255, 255]); },
+  lump(b, r, c) { b.fill((x, y) => { const dx = x - 7.5, dy = y - 8; if (dx * dx / 28 + dy * dy / 22 > 1 + (vnoise(x * .8, y * .8, 4) - 0.5) * 0.5) return null; return JT(r, c, 10); }); b.set(5, 6, sh(c, 1.4)); b.set(6, 5, sh(c, 1.4)); },
+  dust(b, r, c) { for (let y = 6; y < 14; y++) { const w = Math.max(0, 7 - Math.abs(y - 11) * 1.6 - (y < 8 ? (8 - y) * 1.5 : 0)); for (let x = 8 - w; x < 8 + w; x++) if (r() < 0.78) b.set(x, y, JT(r, c, 20)); } },
+  special(b, r, id) { SPECIAL[id](b, r); },
+  sprite(b, r, id, a) { SPRITE[id](b, r, a); },
+  door(b, r, species, upper) {
+    if (species === 'iron') { b.fill(() => JT(r, [200, 200, 204], 6)); b.rect(0, 0, 15, 0, [150, 150, 156]); b.rect(0, 0, 0, 15, [150, 150, 156]); b.rect(15, 0, 15, 15, [150, 150, 156]); if (upper) { for (const [x, y] of [[3, 3], [7, 3], [11, 3], [3, 7], [7, 7], [11, 7]]) b.rect(x, y, x + 2, y + 2, [120, 124, 130]); } else { b.rect(3, 2, 12, 12, [186, 186, 192]); b.set(12, 8, [90, 90, 96]); b.set(12, 9, [90, 90, 96]); } return; }
+    const C = { wood: [160, 120, 64], spruce: [114, 84, 48], birch: [196, 178, 122], jungle: [160, 115, 80], acacia: [168, 90, 50], dark_oak: [66, 43, 20] }[species];
+    b.fill(() => JT(r, C, 8)); const dk = sh(C, 0.66);
+    for (let y = 0; y < 16; y++) { b.set(0, y, dk); b.set(15, y, dk); } for (let x = 0; x < 16; x++) { b.set(x, 0, dk); }
+    if (upper) { for (const [x, y] of [[3, 3], [9, 3], [3, 8], [9, 8]]) { b.rect(x, y, x + 3, y + 3, [196, 228, 240, 200]); } }
+    else { b.rect(3, 2, 12, 6, sh(C, 0.82)); b.rect(3, 9, 12, 14, sh(C, 0.82)); b.set(12, 8, [60, 48, 36]); b.set(12, 9, [60, 48, 36]); b.set(11, 8, [200, 200, 200]); }
+  },
+};
+const SPECIAL = {
+  podzol_side(b, r) { const dep = []; for (let x = 0; x < 16; x++) dep.push(3 + (r() < 0.4 ? 1 : 0)); b.fill((x, y) => y < dep[x] ? JT(r, [100, 68, 38], 14) : JT(r, [122, 86, 58], 14)); },
+  ice(b, r) { b.fill(() => JT(r, [150, 192, 250], 8)); b.line(2, 13, 8, 5, [220, 238, 255]); b.line(8, 14, 13, 8, [200, 226, 255]); },
+  packed_ice(b, r) { KP.blotch(b, r, [120, 160, 226], 26, 8); b.line(1, 9, 7, 3, [190, 214, 250]); },
+  lava(b, r) { const o = r() * 60; b.fill((x, y) => { const t = vnoise(x * 0.5 + o, y * 0.5, 13); return t > 0.62 ? JT(r, [255, 210, 70], 14) : t > 0.4 ? JT(r, [240, 120, 18], 14) : JT(r, [200, 60, 10], 12); }); },
+  glowstone(b, r) { const o = r() * 60; b.fill((x, y) => { const t = vnoise(x * 0.6 + o, y * 0.6, 23); return t > 0.58 ? JT(r, [255, 232, 150], 12) : t > 0.35 ? JT(r, [226, 178, 90], 12) : JT(r, [176, 120, 50], 12); }); },
+  sea_lantern(b, r) { b.fill((x, y) => (x % 8 === 0 || y % 8 === 0) ? JT(r, [96, 150, 142], 6) : JT(r, [214, 240, 232], 8)); b.rect(5, 5, 10, 10, [240, 252, 248]); },
+  quartz_chiseled(b, r) { KP.noise(b, r, [236, 232, 224], 4, 0.02); for (let x = 0; x < 16; x++) { b.set(x, 2, [200, 196, 188]); b.set(x, 13, [200, 196, 188]); } for (let x = 3; x < 13; x++) { b.set(x, 5, [206, 202, 194]); b.set(x, 10, [206, 202, 194]); } },
+  quartz_lines(b, r) { KP.noise(b, r, [236, 232, 224], 4, 0.02); for (const x of [3, 7, 11]) for (let y = 0; y < 16; y++) b.set(x, y, [208, 204, 196]); },
+  purpur_pillar(b, r) { KP.noise(b, r, [168, 120, 168], 6, 0.03); for (const x of [2, 7, 12]) for (let y = 0; y < 16; y++) b.set(x, y, [140, 96, 140]); },
+  bookshelf(b, r) { b.fill(() => JT(r, [160, 120, 64], 8)); const cols = [[160, 50, 40], [50, 90, 150], [70, 130, 60], [190, 150, 50], [110, 60, 120], [200, 200, 190]]; for (const y0 of [2, 9]) { for (let x = 0; x < 16; x += 2) { const c = cols[(r() * cols.length) | 0], h = 5 + ((r() * 2) | 0); b.rect(x, y0 + (6 - h), x + 1, y0 + 5, JT(r, c, 12)); } } },
+  tnt_side(b, r) { b.fill(() => JT(r, [206, 44, 36], 8)); b.rect(0, 5, 15, 10, [226, 222, 208]); for (const [x, w] of [[2, 3], [6, 3], [10, 3]]) { b.rect(x, 6, x + w - 1, 6, [30, 30, 30]); b.rect(x + 1, 6, x + 1, 9, [30, 30, 30]); } b.rect(0, 4, 15, 4, [150, 28, 24]); b.rect(0, 11, 15, 11, [150, 28, 24]); },
+  tnt_top(b, r) { b.fill(() => JT(r, [206, 44, 36], 8)); b.rect(6, 6, 9, 9, [180, 150, 100]); b.rect(7, 7, 8, 8, [60, 50, 40]); },
+  pumpkin_side(b, r) { b.fill((x) => JT(r, x % 4 === 0 ? [186, 96, 14] : [226, 132, 24], 8)); },
+  pumpkin_top(b, r) { KP.noise(b, r, [214, 120, 20], 8, 0.04); b.rect(7, 7, 8, 8, [70, 100, 40]); },
+  pumpkin_face(b, r) { SPECIAL.pumpkin_side(b, r); const k = [40, 20, 6]; b.rect(3, 4, 5, 6, k); b.rect(10, 4, 12, 6, k); b.rect(7, 7, 8, 8, k); b.rect(3, 10, 12, 10, k); b.rect(4, 11, 11, 11, k); },
+  pumpkin_face_on(b, r) { SPECIAL.pumpkin_side(b, r); const k = [255, 226, 90]; b.rect(3, 4, 5, 6, k); b.rect(10, 4, 12, 6, k); b.rect(7, 7, 8, 8, k); b.rect(3, 10, 12, 10, k); b.rect(4, 11, 11, 11, k); },
+  melon_side(b, r) { b.fill((x) => JT(r, x % 5 < 2 ? [60, 110, 30] : [130, 170, 50], 8)); },
+  melon_top(b, r) { b.fill((x, y) => JT(r, Math.floor(Math.hypot(x - 7.5, y - 7.5)) % 3 === 0 ? [70, 120, 36] : [124, 164, 48], 8)); },
+  hay_side(b, r) { b.fill((x, y) => (y >= 5 && y <= 6) || (y >= 10 && y <= 11) ? JT(r, [120, 82, 40], 8) : JT(r, [210, 178, 52], 14)); },
+  hay_top(b, r) { b.fill((x, y) => JT(r, (x + y) % 4 === 0 ? [180, 148, 40] : [214, 184, 60], 10)); b.rect(0, 0, 15, 0, [150, 110, 40]); b.rect(0, 15, 15, 15, [150, 110, 40]); },
+  bone_side(b, r) { b.fill((x) => JT(r, x % 4 === 1 ? [200, 196, 176] : [226, 222, 204], 6)); },
+  bone_top(b, r) { b.fill((x, y) => JT(r, Math.floor(Math.hypot(x - 7.5, y - 7.5)) % 3 === 0 ? [186, 182, 162] : [226, 222, 204], 6)); },
+  sponge(b, r) { b.fill(() => JT(r, [214, 206, 70], 12)); for (let i = 0; i < 12; i++) b.disc(1 + r() * 14, 1 + r() * 14, 1 + r() * 0.8, [150, 140, 40]); },
+  slime(b, r) { b.fill((x, y) => { const e = Math.min(x, y, 15 - x, 15 - y); return e < 2 ? [88, 170, 70, 230] : [120, 200, 96, 170]; }); b.rect(5, 5, 6, 6, [200, 240, 190, 220]); },
+  noteblock(b, r) { KP.planks(b, r, [150, 104, 70]); b.rect(6, 6, 9, 9, [70, 44, 30]); b.rect(7, 7, 8, 8, [30, 20, 14]); },
+  jukebox_top(b, r) { KP.planks(b, r, [130, 92, 62]); b.rect(5, 5, 10, 10, [40, 28, 22]); b.rect(7, 7, 8, 8, [10, 8, 8]); },
+  farmland(b, r) { b.fill((x, y) => JT(r, y % 4 === 0 ? [110, 74, 46] : [134, 92, 58], 8)); },
+  farmland_wet(b, r) { b.fill((x, y) => JT(r, y % 4 === 0 ? [60, 38, 24] : [84, 56, 36], 8)); },
+  path_side(b, r) { b.fill((x, y) => y < 2 ? JT(r, [150, 126, 78], 10) : JT(r, [122, 86, 58], 14)); },
+  cactus_side(b, r) { b.fill((x) => JT(r, x % 4 === 2 ? [40, 110, 40] : [60, 140, 56], 8)); for (const [x, y] of [[3, 3], [11, 6], [6, 10], [13, 13], [2, 14]]) b.set(x, y, [230, 230, 200]); },
+  cactus_top(b, r) { b.fill((x, y) => (Math.min(x, y, 15 - x, 15 - y) < 1) ? [40, 110, 40] : JT(r, [70, 150, 60], 8)); b.rect(7, 7, 8, 8, [40, 110, 40]); },
+  table_front(b, r) { KP.planks(b, r, [176, 134, 80]); b.rect(2, 3, 5, 5, [90, 66, 50]); b.rect(9, 4, 13, 6, [200, 200, 204]); b.rect(3, 9, 12, 10, [96, 70, 50]); },
+  furnace_side(b, r) { cobbleFn(b, r, false); },
+  furnace_on(b, r) { cobbleFn(b, r, false); b.rect(3, 5, 12, 13, [60, 60, 64]); b.rect(4, 6, 11, 12, [20, 20, 22]); b.rect(4, 10, 11, 12, [250, 140, 30]); b.rect(6, 9, 9, 10, [255, 210, 80]); },
+  enchant_top(b, r) { KP.noise(b, r, [150, 30, 36], 8, 0.04); for (let i = 0; i < 16; i++) { b.set(i, 0, [230, 200, 80]); b.set(i, 15, [230, 200, 80]); b.set(0, i, [230, 200, 80]); b.set(15, i, [230, 200, 80]); } },
+  enchant_side(b, r) { KP.noise(b, r, [24, 18, 36], 8, 0.05); b.rect(0, 0, 15, 2, [150, 30, 36]); b.rect(0, 3, 15, 3, [230, 200, 80]); for (const [x, y] of [[3, 9], [7, 11], [11, 9], [5, 13]]) b.set(x, y, [90, 220, 220]); },
+  chest_front(b, r) { KP.planks(b, r, [160, 112, 50]); b.rect(0, 0, 15, 1, [110, 74, 30]); b.rect(0, 14, 15, 15, [110, 74, 30]); b.rect(0, 0, 1, 15, [110, 74, 30]); b.rect(14, 0, 15, 15, [110, 74, 30]); b.rect(0, 6, 15, 6, [96, 64, 26]); b.rect(7, 5, 8, 8, [200, 200, 204]); b.set(7, 8, [90, 90, 96]); },
+  chest_side(b, r) { KP.planks(b, r, [160, 112, 50]); b.rect(0, 0, 15, 1, [110, 74, 30]); b.rect(0, 14, 15, 15, [110, 74, 30]); b.rect(0, 0, 1, 15, [110, 74, 30]); b.rect(14, 0, 15, 15, [110, 74, 30]); b.rect(0, 6, 15, 6, [96, 64, 26]); },
+  chest_top(b, r) { KP.planks(b, r, [170, 122, 56]); b.rect(0, 0, 15, 0, [110, 74, 30]); b.rect(0, 15, 15, 15, [110, 74, 30]); b.rect(0, 0, 0, 15, [110, 74, 30]); b.rect(15, 0, 15, 15, [110, 74, 30]); },
+  anvil_top(b, r) { b.fill(() => JT(r, [56, 56, 62], 6)); b.rect(2, 4, 13, 11, [92, 92, 100]); b.rect(3, 5, 12, 10, [70, 70, 78]); },
+  torch(b, r) { b.rect(7, 6, 8, 15, [120, 82, 40]); b.rect(7, 6, 8, 7, [64, 50, 36]); b.rect(6, 3, 9, 5, [255, 226, 90]); b.rect(7, 2, 8, 2, [255, 140, 30]); b.rect(7, 4, 8, 4, [255, 250, 200]); },
+  ladder(b, r) { b.rect(2, 0, 3, 15, [150, 108, 60]); b.rect(12, 0, 13, 15, [150, 108, 60]); for (const y of [1, 5, 9, 13]) b.rect(4, y, 11, y + 1, [130, 92, 50]); },
+  iron_bars(b, r) { for (const x of [3, 7, 11]) b.rect(x, 0, x + 1, 15, [150, 154, 160]); b.rect(0, 7, 15, 8, [128, 132, 138]); },
+  lilypad(b, r) { b.fill((x, y) => { const d = Math.hypot(x - 7.5, y - 7.5); if (d > 7 || (x > 7 && Math.abs(y - 7.5) < 1.2 && x > 8)) return null; return JT(r, d > 6 ? [150, 150, 150] : [196, 196, 196], 12); }); },
+  fern(b, r) { for (let k = 4; k < 16; k++) { b.set(7 + (k < 8 ? 1 : 0), k, [196, 196, 196]); } for (let k = 4; k < 15; k += 2) { const w = Math.min(k - 2, 15 - k, 4); for (let i = 1; i <= w; i++) { b.set(7 - i, k + (i > 2 ? 1 : 0), JT(r, [200, 200, 200], 14)); b.set(8 + i, k + (i > 2 ? 1 : 0), JT(r, [200, 200, 200], 14)); } } },
+  deadbush(b, r) { const c = [120, 86, 40]; b.line(7, 15, 7, 9, c); b.line(7, 12, 3, 7, c); b.line(7, 11, 11, 6, c); b.line(5, 9, 4, 5, c); b.line(9, 9, 10, 4, c); b.line(3, 7, 2, 4, c); b.line(11, 6, 13, 5, c); },
+  mushroom_brown(b, r) { b.rect(7, 10, 8, 15, [200, 180, 150]); b.rect(4, 7, 11, 9, [140, 100, 66]); b.rect(5, 6, 10, 6, [140, 100, 66]); b.rect(5, 7, 6, 7, [170, 128, 88]); },
+  mushroom_red(b, r) { b.rect(7, 10, 8, 15, [226, 220, 200]); b.rect(4, 6, 11, 9, [200, 40, 40]); b.rect(5, 5, 10, 5, [200, 40, 40]); b.set(6, 6, [250, 250, 250]); b.set(9, 7, [250, 250, 250]); b.set(5, 8, [250, 250, 250]); },
+  reeds(b, r) { for (const x of [3, 8, 12]) for (let y = 0; y < 16; y++) { b.set(x, y, JT(r, y % 5 === 4 ? [150, 150, 150] : [196, 196, 196], 10)); b.set(x + 1, y, JT(r, [176, 176, 176], 10)); } b.set(4, 3, [196, 196, 196]); b.set(9, 1, [196, 196, 196]); b.set(13, 5, [196, 196, 196]); },
+  stained_glass(b, r) { b.fill((x, y) => (Math.min(x, y, 15 - x, 15 - y) === 0) ? [236, 236, 236, 255] : [226, 226, 226, 150]); b.set(3, 3, [255, 255, 255, 230]); b.set(4, 4, [255, 255, 255, 230]); },
+};
+const SPRITE = {
+  bow(b) { const w = [130, 90, 46]; b.line(10, 1, 13, 4, w); b.line(13, 4, 13, 9, w); b.line(13, 9, 10, 14, w); b.line(10, 1, 10, 14, [220, 220, 210]); b.set(11, 2, w); },
+  arrow(b) { b.line(3, 12, 12, 3, [140, 100, 54]); b.rect(12, 2, 13, 3, [170, 170, 176]); b.set(11, 3, [170, 170, 176]); b.set(13, 3, [170, 170, 176]); b.set(2, 12, [236, 236, 236]); b.set(3, 13, [236, 236, 236]); b.set(2, 11, [236, 236, 236]); b.set(4, 13, [236, 236, 236]); },
+  shears(b) { b.line(3, 12, 12, 3, [190, 190, 196]); b.line(4, 13, 13, 4, [150, 150, 156]); b.rect(2, 12, 4, 14, [180, 50, 40]); b.rect(1, 10, 2, 12, [180, 50, 40]); },
+  flintsteel(b) { b.rect(3, 8, 12, 12, [160, 160, 168]); b.rect(4, 9, 11, 11, [120, 120, 128]); b.rect(5, 4, 9, 7, [70, 70, 76]); b.rect(6, 3, 8, 3, [70, 70, 76]); },
+  saddle(b) { b.rect(3, 5, 12, 10, [110, 72, 40]); b.rect(2, 7, 13, 9, [110, 72, 40]); b.rect(4, 6, 11, 8, [140, 96, 56]); b.rect(3, 10, 4, 13, [80, 52, 30]); b.rect(11, 10, 12, 13, [80, 52, 30]); b.set(4, 13, [200, 200, 200]); b.set(11, 13, [200, 200, 200]); },
+  bucket(b, r, content) { const g = [190, 190, 196]; for (let y = 3; y < 13; y++) { const inset = Math.floor((y - 3) / 4); for (let x = 3 + inset; x < 13 - inset; x++) b.set(x, y, (x === 3 + inset || x === 12 - inset) ? sh(g, 0.7) : g); } b.rect(3, 3, 12, 3, sh(g, 0.55)); if (content) b.rect(4, 4, 11, 5, content); },
+  bone(b) { const c = [236, 232, 215]; b.line(4, 11, 11, 4, c); b.line(5, 11, 11, 5, c); b.disc(3, 12, 1.7, c); b.disc(5, 13, 1.5, c); b.disc(12, 3, 1.7, c); b.disc(10, 2, 1.5, c); b.set(6, 9, sh(c, 0.8)); },
+  feather(b) { const c = [240, 240, 240]; b.line(3, 13, 12, 3, [200, 200, 200]); for (let i = 0; i < 8; i++) { b.set(4 + i, 11 - i, c); b.set(5 + i, 11 - i, c); b.set(6 + i, 11 - i, sh(c, 0.9)); b.set(3 + i, 10 - i, c); } },
+  string(b) { const c = [232, 232, 232]; b.line(2, 4, 13, 6, c); b.line(13, 6, 2, 9, c); b.line(2, 9, 13, 12, c); b.set(1, 4, c); },
+  leather(b) { b.rect(3, 4, 12, 12, [140, 84, 48]); b.rect(4, 3, 11, 13, [140, 84, 48]); b.rect(5, 5, 10, 11, [170, 108, 64]); b.rect(2, 6, 2, 10, [120, 70, 40]); b.rect(13, 6, 13, 10, [120, 70, 40]); },
+  paper(b) { b.rect(3, 3, 12, 12, [240, 240, 236]); b.rect(3, 12, 12, 12, [200, 200, 196]); for (const y of [5, 7, 9]) b.rect(4, y, 10, y, [180, 180, 176]); },
+  book(b) { b.rect(3, 2, 12, 13, [120, 60, 36]); b.rect(4, 3, 12, 12, [150, 80, 50]); b.rect(3, 2, 4, 13, [90, 44, 26]); b.rect(12, 3, 12, 12, [236, 232, 220]); b.rect(6, 5, 9, 9, [220, 190, 80]); },
+  egg(b) { b.ell(7.5, 8.5, 4, 5, [236, 226, 200]); b.set(6, 6, [255, 252, 240]); b.set(9, 11, [200, 188, 160]); },
+  snowball(b) { b.disc(7.5, 7.5, 5, [244, 248, 252]); b.disc(9, 9, 3, [210, 224, 240]); b.set(5, 5, [255, 255, 255]); },
+  slimeball(b) { b.disc(7.5, 7.5, 5, [110, 190, 90]); b.disc(8.5, 8.5, 3, [80, 160, 70]); b.set(5, 5, [210, 250, 200]); b.set(6, 5, [210, 250, 200]); },
+  spidereye(b) { b.disc(7.5, 7.5, 5, [170, 34, 40]); b.disc(7.5, 7.5, 2, [40, 10, 14]); b.set(5, 5, [240, 120, 120]); },
+  seeds(b, r) { for (const [x, y] of [[4, 6], [7, 4], [10, 7], [5, 10], [9, 11], [12, 12], [3, 13]]) { b.set(x, y, [110, 150, 50]); b.set(x + 1, y, [90, 126, 40]); } },
+  wheat(b) { for (const x of [4, 7, 10]) { b.line(x, 14, x + 1, 3, [190, 160, 70]); for (let k = 0; k < 4; k++) { b.set(x - 1, 4 + k * 2, [214, 186, 90]); b.set(x + 2, 5 + k * 2, [214, 186, 90]); } } b.rect(3, 12, 11, 13, [120, 84, 40]); },
+  apple(b) { b.disc(7.5, 9, 4.8, [200, 40, 36]); b.set(5, 7, [250, 150, 140]); b.set(6, 7, [250, 150, 140]); b.rect(7, 3, 7, 5, [100, 64, 30]); b.rect(8, 3, 9, 4, [70, 150, 50]); },
+  bread(b) { b.ell(7.5, 9, 6, 3.6, [196, 140, 70]); b.ell(7.5, 8, 5.2, 2.6, [224, 170, 92]); for (const x of [4, 7, 10]) b.line(x, 6, x + 1, 9, [170, 112, 52]); },
+  melonslice(b) { for (let y = 3; y < 13; y++) for (let x = 2; x < 14; x++) { const d = Math.hypot(x - 7.5, y - 1); if (d < 9.5 && d > 4) b.set(x, y, d > 8.2 ? [70, 130, 40] : d > 7.4 ? [200, 230, 170] : [220, 50, 60]); } b.set(6, 9, [40, 20, 20]); b.set(9, 8, [40, 20, 20]); b.set(8, 11, [40, 20, 20]); },
+  carrot(b) { b.line(3, 13, 11, 5, [236, 130, 30]); b.line(3, 12, 10, 5, [236, 130, 30]); b.line(4, 13, 11, 6, [210, 110, 24]); b.line(12, 4, 14, 2, [70, 160, 50]); b.line(12, 4, 13, 1, [70, 160, 50]); b.line(12, 4, 15, 4, [70, 160, 50]); },
+  potato(b) { b.ell(7.5, 8.5, 5, 4, [210, 164, 84]); b.set(5, 7, [160, 120, 56]); b.set(9, 10, [160, 120, 56]); b.set(10, 7, [250, 214, 140]); },
+  bakedpotato(b) { b.ell(7.5, 8.5, 5, 4, [170, 110, 50]); b.set(6, 7, [236, 210, 130]); b.set(8, 9, [236, 210, 130]); b.set(10, 7, [236, 210, 130]); },
+  beet(b) { b.disc(7.5, 9.5, 4, [150, 24, 52]); b.set(6, 8, [220, 90, 110]); b.line(7, 6, 5, 2, [70, 150, 50]); b.line(8, 6, 10, 2, [70, 150, 50]); },
+  meat(b, r, kind) {
+    const C = { cooked: [[120, 64, 34], [150, 90, 52]], cookedpork: [[176, 112, 74], [206, 146, 100]], cookedmutton: [[130, 70, 40], [160, 100, 60]], rabbit: [[210, 150, 128], [236, 186, 166]], cookedrabbit: [[160, 100, 62], [196, 136, 90]], rotten: [[96, 120, 70], [126, 150, 90]] }[kind];
+    b.ell(7.5, 8.5, 6, 4.6, C[0]); b.ell(7.5, 8, 5, 3.4, C[1]); b.set(5, 7, sh(C[1], 1.2)); b.set(6, 7, sh(C[1], 1.2)); b.set(10, 9, sh(C[0], 0.8)); if (kind === 'rotten') { b.set(4, 9, [70, 90, 50]); b.set(9, 6, [70, 90, 50]); }
+  },
+  drumstick(b, r, cooked) { const m = cooked ? [180, 110, 50] : [236, 190, 150], l = cooked ? [216, 150, 80] : [250, 220, 190]; b.ell(5.5, 6, 3.8, 3.6, m); b.set(4, 5, l); b.set(5, 5, l); b.line(7, 8, 12, 13, [236, 232, 215]); b.disc(12.5, 13, 1.4, [236, 232, 215]); b.set(13, 12, [236, 232, 215]); },
+  cookie(b) { b.disc(7.5, 7.5, 5.5, [200, 140, 64]); b.disc(7.5, 7.5, 4, [214, 158, 80]); for (const [x, y] of [[5, 5], [9, 6], [6, 9], [10, 10], [8, 7]]) b.set(x, y, [90, 50, 28]); },
+};
+function paintSpec(d, t, spec) {
+  const b = tileBuf(), r = mulberry32(7000 + t * 31), [kind, ...args] = spec;
+  const fn = KP[kind]; if (!fn) throw new Error('no painter ' + kind);
+  fn(b, r, ...args);
+  const ox = (t % ATLAS_COLS) * 16, oy = Math.floor(t / ATLAS_COLS) * 16;
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const i = ((oy + y) * ATLAS_PX + ox + x) * 4, j = (y * 16 + x) * 4; d[i] = b.a[j]; d[i + 1] = b.a[j + 1]; d[i + 2] = b.a[j + 2]; d[i + 3] = b.a[j + 3]; }
+}
 
 /* ===== Texture Lab. Uses TILES, SKINS, makeAtlas, makeZip, expandFiles from the shared sources. ===== */
 const $ = id => document.getElementById(id);
@@ -314,7 +793,7 @@ const STORE = 'blockland-texlab-v1';
 const atlas = makeAtlas();
 const slots = {}; // key -> { key, label, cat, w, h, canvas, def (ImageData), tint, mod }
 for (const t of TILES) {
-  const c = mk(16, 16); c.getContext('2d').drawImage(atlas, (t.t % 16) * 16, Math.floor(t.t / 16) * 16, 16, 16, 0, 0, 16, 16);
+  const c = mk(16, 16); c.getContext('2d').drawImage(atlas, (t.t % ATLAS_COLS) * 16, Math.floor(t.t / ATLAS_COLS) * 16, 16, 16, 0, 0, 16, 16);
   slots[t.name] = { key: t.name, label: t.label, cat: t.cat, w: 16, h: 16, canvas: c, tint: t.tint, tile: t, mod: false };
 }
 function faceRects(p) {
@@ -389,7 +868,7 @@ function draw() {
     const seen = new Set(); cg.font = '600 ' + Math.max(9, Math.floor(scale * 0.9)) + 'px monospace'; cg.textBaseline = 'top';
     for (const p of parts) { if (p.dup) continue; for (const r of faceRects(p)) { const key = r.join(','); if (seen.has(key)) continue; seen.add(key);
       cg.strokeStyle = 'rgba(166,217,79,.9)'; cg.lineWidth = 1; cg.strokeRect(r[1] * scale + .5, r[2] * scale + .5, r[3] * scale - 1, r[4] * scale - 1);
-      if (r[3] * scale > 60 && r[4] * scale > 14) { cg.fillStyle = 'rgba(0,0,0,.6)'; const label = p.n + ' ' + r[0]; const tw = cg.measureText(label).width; cg.fillRect(r[1] * scale + 2, r[2] * scale + 2, Math.min(tw + 6, r[3] * scale - 4), scale * 1.1); cg.fillStyle = '#fff'; cg.fillText(label, r[1] * scale + 5, r[2] * scale + 3, r[3] * scale - 8); } } }
+      if (r[3] * scale > 60 && r[4] * scale > 14) { cg.fillStyle = 'rgba(0,0,0,.6)'; const label = (p.n || '') + ' ' + r[0]; const tw = cg.measureText(label).width; cg.fillRect(r[1] * scale + 2, r[2] * scale + 2, Math.min(tw + 6, r[3] * scale - 4), scale * 1.1); cg.fillStyle = '#fff'; cg.fillText(label, r[1] * scale + 5, r[2] * scale + 3, r[3] * scale - 8); } } }
   }
 }
 /* paint */
@@ -446,19 +925,61 @@ $('btnLoadSlot').onclick = () => $('fileSlot').click();
 $('fileSlot').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const b = await createImageBitmap(f); await loadInto(cur, b, 0, 0, cur.skin ? b.width : b.width, cur.skin ? b.height : (cur.key === 'water_still' ? b.width : b.height)); draw(); previews(); persist(); } catch (er) { toast('That file is not a PNG image'); } e.target.value = ''; };
 $('btnSaveSlot').onclick = () => cur.canvas.toBlob(b => download(b, (cur.tile ? cur.tile.name : cur.skin) + '.png'));
 $('btnImport').onclick = () => $('fileImport').click();
-const BLOCKMAP = {}; for (const t of TILES) { BLOCKMAP[t.name] = t.name; (t.alias || []).forEach(n => BLOCKMAP[n] = t.name); }
-$('fileImport').onchange = async e => {
-  const files = await expandFiles([...e.target.files]); let n = 0;
+
+/* ---------- zip scanner: looks through every folder and subfolder, matches names to existing slots, reports the result ---------- */
+const NAMEMAP = {}; for (const t of TILES) { NAMEMAP[t.name] = t.name; (t.alias || []).forEach(n => NAMEMAP[n] = t.name); }
+const cmaps = {}; // user colour maps kept for export
+const norm = n => n.toLowerCase().replace(/\.(png|json)$/, '').replace(/[ \-]+/g, '_').replace(/_\d+$/, '');
+function matchBlock(key) {
+  const tries = [key, key.replace(/^(block|blocks|item|items)_/, ''), key.replace(/_still$/, ''), key.replace(/_overlay$/, '_side_overlay'), key.replace(/^tile_/, '')];
+  for (const k of tries) if (NAMEMAP[k]) return NAMEMAP[k];
+  return null;
+}
+function matchMob(key, path) {
+  if (SKIN_BY_NAME[key]) return SKIN_BY_NAME[key];
+  const folder = path.toLowerCase().split('/').slice(-2, -1)[0] || '';
+  if (SKIN_BY_NAME[folder] && !SKIN_BY_NAME[key] && /^(horse|rabbit|villager|wolf)/.test(folder)) return SKIN_BY_NAME[folder];
+  return null;
+}
+function sampleCmap(bmp, tt, hh) { const c = mk(256, 256), g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(bmp, 0, 0, 256, 256); const d = g.getImageData(Math.round((1 - tt) * 255), Math.round((1 - tt * hh) * 255), 1, 1).data; return '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join(''); }
+async function scanFiles(files) {
+  const rep = { matched: [], mobs: [], maps: [], atlas: false, unmatched: [], skipped: 0, replaced: new Set() };
   for (const f of files) {
-    if (/pack\.json$/i.test(f.name)) { try { const j = JSON.parse(await f.text()); if (j.tint) { Object.assign(tint, j.tint); $('tGrass').value = tint.grass; $('tFoliage').value = tint.foliage; } } catch (er) { } continue; }
-    let b; try { b = await createImageBitmap(f); } catch (er) { continue; }
-    const key = baseName(f);
-    if (BLOCKMAP[key]) { const s = slots[BLOCKMAP[key]]; await loadInto(s, b, 0, 0, b.width, key === 'water_still' ? b.width : b.height); n++; }
-    else if (slots['skin:' + key]) { const s = slots['skin:' + key], h = Math.round(b.width * s.h / s.w); await loadInto(s, b, 0, 0, b.width, Math.min(b.height, h)); n++; }
-    else if (b.width === b.height && b.width >= 256 && b.width % 16 === 0) { const ts = b.width / 16; for (const t of TILES) if (CLASSIC[t.t] !== undefined) { const src = CLASSIC[t.t]; await loadInto(slots[t.name], b, (src % 16) * ts, Math.floor(src / 16) * ts, ts, ts); } n++; }
+    const path = f.path || f.webkitRelativePath || f.name;
+    if (/\.json$/i.test(f.name)) { if (/pack\.json$/i.test(f.name)) { try { const j = JSON.parse(await f.text()); if (j.tint) { Object.assign(tint, j.tint); $('tGrass').value = tint.grass; $('tFoliage').value = tint.foliage; } } catch (er) { } } continue; }
+    if (!/\.png$/i.test(f.name)) { rep.skipped++; continue; }
+    let b; try { b = await createImageBitmap(f); } catch (er) { rep.unmatched.push(path); continue; }
+    const key = norm(f.name), lower = path.toLowerCase();
+    if ((key === 'grass' || key === 'foliage') && /colormap/.test(lower) || ((key === 'grass' || key === 'foliage') && b.width === b.height && b.width <= 256)) {
+      cmaps[key] = f; tint[key] = key === 'grass' ? sampleCmap(b, 0.8, 0.4) : sampleCmap(b, 0.8, 0.4); $('tGrass').value = tint.grass; $('tFoliage').value = tint.foliage; rep.maps.push(path); continue;
+    }
+    const mob = /entity|mob/.test(lower) || SKIN_BY_NAME[key] ? matchMob(key, path) : null;
+    if (mob) { const s = slots['skin:' + mob]; if (s) { const h = Math.round(b.width * s.h / s.w); await loadInto(s, b, 0, 0, b.width, Math.min(b.height, h)); rep.mobs.push(path + '  ->  ' + s.label); rep.replaced.add(s.key); continue; } }
+    const blk = matchBlock(key);
+    if (blk) { const s = slots[blk], sh = b.height > b.width && b.height % b.width === 0 ? b.width : b.height; await loadInto(s, b, 0, 0, b.width, sh); rep.matched.push(path + '  ->  ' + s.label); rep.replaced.add(s.key); continue; }
+    if (b.width === b.height && b.width >= 256 && b.width % 16 === 0 && /terrain|atlas|blocks/.test(lower + key)) { const ts = b.width / 16; for (const t of TILES) if (CLASSIC[t.t] !== undefined) { const src = CLASSIC[t.t]; await loadInto(slots[t.name], b, (src % 16) * ts, Math.floor(src / 16) * ts, ts, ts); rep.replaced.add(t.name); } rep.atlas = true; continue; }
+    rep.unmatched.push(path);
   }
-  e.target.value = ''; toast(n ? n + ' file' + (n > 1 ? 's' : '') + ' imported' : 'No matching files. Use the names shown under each slot.'); buildList(); draw(); previews(); persist();
+  return rep;
+}
+function showReport(rep, total) {
+  const R = $('report'); R.hidden = false;
+  const missing = Object.values(slots).filter(s => s.cat !== 'Mobs' && !rep.replaced.has(s.key) && !s.mod).length;
+  const mobsMissing = Object.values(slots).filter(s => s.cat === 'Mobs' && !rep.replaced.has(s.key) && !s.mod).length;
+  const list = (title, arr) => arr.length ? '<details><summary>' + title + ' (' + arr.length + ')</summary><pre>' + arr.map(x => x.replace(/&/g, '&amp;').replace(/</g, '&lt;')).join('\n') + '</pre></details>' : '';
+  R.innerHTML = '<div class="row" style="justify-content:space-between"><h2>Scan result</h2><button id="repClose">Close</button></div>' +
+    '<p class="hint">Looked through ' + total + ' files in all folders. <b>' + rep.matched.length + '</b> block/item textures and <b>' + rep.mobs.length + '</b> mob skins matched' + (rep.maps.length ? ', ' + rep.maps.length + ' colour map(s) used for the biome colours' : '') + (rep.atlas ? ', plus a stitched atlas' : '') + '. <b>' + rep.unmatched.length + '</b> files had no matching slot. Slots still using the built-in art: ' + missing + ' block/item, ' + mobsMissing + ' mob.</p>' +
+    '<p class="hint">Everything is loaded as editable slots. Click any slot to touch it up, then export when you are happy. Nothing leaves your device.</p>' +
+    list('Matched blocks and items', rep.matched) + list('Matched mobs', rep.mobs) + list('Colour maps', rep.maps) + list('No matching slot', rep.unmatched);
+  $('repClose').onclick = () => { R.hidden = true; };
+}
+$('fileImport').onchange = async e => {
+  const files = await expandFiles([...e.target.files]); e.target.value = '';
+  toast('Scanning ' + files.length + ' files...'); const rep = await scanFiles(files); showReport(rep, files.length);
+  buildList(); draw(); previews(); persist();
 };
+$('fileFolder').onchange = async e => { const files = [...e.target.files]; e.target.value = ''; const all = await expandFiles(files); toast('Scanning ' + all.length + ' files...'); const rep = await scanFiles(all); showReport(rep, all.length); buildList(); draw(); previews(); persist(); };
+$('btnFolder').onclick = () => $('fileFolder').click();
 function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
 $('btnExport').onclick = async () => {
   const all = $('optAll').checked, entries = [], list = Object.values(slots).filter(s => all || s.mod);
@@ -467,6 +988,7 @@ $('btnExport').onclick = async () => {
     const blob = await new Promise(r => s.canvas.toBlob(r, 'image/png')), data = new Uint8Array(await blob.arrayBuffer());
     entries.push({ name: (s.skin ? 'entity/' + s.skin : (s.cat === 'Blocks' ? 'blocks/' : 'items/') + s.tile.name) + '.png', data });
   }
+  for (const k in cmaps) entries.push({ name: 'colormap/' + k + '.png', data: new Uint8Array(await cmaps[k].arrayBuffer()) });
   entries.push({ name: 'pack.json', data: new TextEncoder().encode(JSON.stringify({ game: 'Blockland', tint }, null, 2)) });
   download(makeZip(entries), 'blockland-pack.zip'); toast('Exported ' + list.length + ' textures');
 };
