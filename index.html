@@ -942,6 +942,7 @@ function getLightRaw(x, y, z) {
   return c.light[bidx(x & 15, y, z & 15)];
 }
 neighborFn = getBlock;
+let blockHook = null; // called after a normal (non-generation) block change: (x, y, z, oldId, newId)
 function getTop(x, z) { const c = chunkAt(x, z); if (!c) return 0; return Math.max(0, c.hm[(z & 15) * 16 + (x & 15)]); }
 function markDirty(c, now) { if (c) { c.dirty = true; if (now) c.now = true; } }
 function setBlock(x, y, z, id, meta = 0, gen) {
@@ -955,6 +956,7 @@ function setBlock(x, y, z, id, meta = 0, gen) {
   else if (y === c.hm[col]) { let t = y - 1; while (t >= 0 && !OPAC[c.blocks[bidx(lx, t, lz)]]) t--; c.hm[col] = t; }
   if (!gen) {
     lightEdit(x, y, z, old, id);
+    if (blockHook) blockHook(x, y, z, old, id);
     c.dirty = c.now = true;
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dz) continue;
@@ -1032,6 +1034,90 @@ function bodyHits(x, y, z, hw, h) {
     }
   }
   return false;
+}
+
+'use strict';
+/* ===== Water and lava physics =====
+   Fluid cell meta: bits 0-2 = flow level (0 = source, 1..7 = flowing, higher = shallower), bit 3 (8) = falling.
+   Water steps 1 level per block (7 blocks), lava 2 (3 blocks). Changes near a fluid schedule an update;
+   updates are processed a few per frame so big spills never stall the game. */
+const fluidQ = new Map(); let fluidClock = 0;
+const FL_DELAY = { [B.WATER]: 0.25, [B.LAVA]: 1.2 };
+const HORIZ = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const isFluid = id => id === B.WATER || id === B.LAVA;
+const flowable = id => id === 0 || (PLANT[id] && SHAPE[id] === SH.CROSS) || id === B.SNOWLAYER;
+const fkey = (x, y, z) => x + ',' + y + ',' + z;
+function chunkLoaded(x, z) { return chunks.has(ck(x >> 4, z >> 4)); }
+function schedule(x, y, z, id) {
+  if (y < 0 || y >= H || !chunkLoaded(x, z)) return;
+  const k = fkey(x, y, z); if (!fluidQ.has(k)) fluidQ.set(k, fluidClock + (FL_DELAY[id] || 0.25));
+}
+function fluidHook(x, y, z, old, id) {
+  if (isFluid(id)) schedule(x, y, z, id);
+  for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+    const n = getBlock(x + dx, y + dy, z + dz); if (isFluid(n)) schedule(x + dx, y + dy, z + dz, n);
+  }
+}
+blockHook = fluidHook;
+/* contact between water and lava */
+function lavaTurns(x, y, z) { // the lava cell at x,y,z meets water
+  const src = (getMeta(x, y, z) & 15) === 0; setBlock(x, y, z, src ? B.OBSIDIAN : B.COBBLE, 0);
+}
+function updateFluid(x, y, z) {
+  const F = getBlock(x, y, z); if (!isFluid(F) || !chunkLoaded(x, z)) return;
+  const water = F === B.WATER, step = water ? 1 : 2, maxL = water ? 7 : 6;
+  let m = getMeta(x, y, z); const src = m === 0;
+  if (!water) { // lava touching water on the sides or top hardens
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]]) if (getBlock(x + dx, y + dy, z + dz) === B.WATER) { lavaTurns(x, y, z); return; }
+  }
+  if (!src) {
+    let want;
+    if (getBlock(x, y + 1, z) === F) want = 8;
+    else {
+      let best = 99, srcN = 0;
+      for (const [dx, dz] of HORIZ) { if (getBlock(x + dx, y, z + dz) !== F) continue; const nm = getMeta(x + dx, y, z + dz); const nl = nm & 8 ? 0 : nm & 7; if (nm === 0) srcN++; if (nl < best) best = nl; }
+      want = best + step;
+      if (best === 99 || want > maxL) want = -1;
+      else if (water && srcN >= 2) { const b = getBlock(x, y - 1, z); if (SOLID[b] || (b === F && getMeta(x, y - 1, z) === 0)) want = 0; }
+    }
+    if (want < 0) { setBlock(x, y, z, 0, 0); return; }
+    if (want !== m) { setBlock(x, y, z, F, want); m = want; }
+    if (want === 0) return fluidHook(x, y, z, F, F);
+  }
+  const below = getBlock(x, y - 1, z);
+  if (y > 0 && flowable(below)) { setBlock(x, y - 1, z, F, 8); return; }
+  if (y > 0 && isFluid(below) && below !== F) { // water over lava / lava over water
+    if (water) lavaTurns(x, y - 1, z); else setBlock(x, y - 1, z, B.STONE, 0);
+    return;
+  }
+  if ((m & 8) && below === F) return; // a falling column resting on a pool does not spread
+  const lvl = m & 8 ? 0 : m & 7, nl = lvl + step; if (nl > maxL) return;
+  for (const [dx, dz] of HORIZ) {
+    const nx = x + dx, nz = z + dz; if (!chunkLoaded(nx, nz)) continue;
+    const nb = getBlock(nx, y, nz);
+    if (flowable(nb)) { setBlock(nx, y, nz, F, nl); }
+    else if (nb === F) { const nm = getMeta(nx, y, nz); if (nm !== 0 && !(nm & 8) && (nm & 7) > nl) setBlock(nx, y, nz, F, nl); }
+    else if (isFluid(nb)) { if (water) lavaTurns(nx, y, nz); else setBlock(nx, y, nz, B.COBBLE, 0); }
+  }
+}
+function fluidTick(dt) {
+  fluidClock += dt; if (!fluidQ.size) return;
+  let n = 0; const due = [];
+  for (const [k, t] of fluidQ) { if (t <= fluidClock) { due.push(k); if (++n >= 48) break; } }
+  for (const k of due) { fluidQ.delete(k); const p = k.split(','); updateFluid(+p[0], +p[1], +p[2]); }
+  if (fluidQ.size > 6000) fluidQ.clear();
+}
+/* direction a current pushes things standing in this cell (towards lower, shallower neighbours) */
+function flowAt(x, y, z) {
+  x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
+  const F = getBlock(x, y, z); if (F !== B.WATER) return [0, 0];
+  const m = getMeta(x, y, z); const mine = m & 8 ? 0 : m & 7; let fx = 0, fz = 0;
+  for (const [dx, dz] of HORIZ) {
+    const nb = getBlock(x + dx, y, z + dz);
+    if (nb === F) { const nm = getMeta(x + dx, y, z + dz), nl = nm & 8 ? 0 : nm & 7; if (nl > mine) { fx += dx; fz += dz; } else if (nl < mine) { fx -= dx; fz -= dz; } }
+    else if (flowable(nb) && !(m & 8) && m !== 0) { fx += dx * 0.5; fz += dz * 0.5; }
+  }
+  const l = Math.hypot(fx, fz); return l > 0 ? [fx / l, fz / l] : [0, 0];
 }
 
 'use strict';
@@ -1493,7 +1579,7 @@ function buildMeshData(c) {
         for (let f = 0; f < 6; f++) {
           const ni = pi + FDI[f], nid = PB[ni];
           if (f === 3 && y === 0) continue;
-          if (OPAQUE[nid] || (nid === id && SAMEHIDE[id])) continue;
+          if (OPAQUE[nid] || (nid === id && SAMEHIDE[id]) || (id === B.ICE && nid === B.WATER)) continue;
           emitCubeFace(id, m, f, pi, ni, y, isT, clim, lx, lz, 0);
           if (id === B.GRASS && f !== 2 && f !== 3) emitCubeFace(id, m, f, pi, ni, y, 0, clim, lx, lz, 1);
         }
@@ -1528,17 +1614,29 @@ function emitCubeFace(id, m, f, pi, ni, y, isT, clim, lx, lz, overlay) {
   const tile = overlay ? TIDX.grass_side_overlay : tileFor(id, m, f);
   emitQuad(isT, tile, overlay ? tintCode(id, m, 2, clim) : tintCode(id, m, f, clim), a0 + a2 < a1 + a3);
 }
+/* surface height of a liquid cell: full if liquid or a lid (ice/solid) sits on top, otherwise lower with the flow level */
+function fluidTop(pi) {
+  const id = PB[pi], above = PB[pi + 1], m = PM[pi];
+  if (above === id || above === B.ICE || OPAQUE[above]) return 1;
+  if (m & 8) return 1;
+  return 0.89 - (m & 7) * 0.1;
+}
 function liquid(id, m, pi, y, clim, lx, lz, water) {
-  const above = PB[pi + 1], ytop = above === id ? 1 : 0.88, isT = water ? 1 : 0;
+  const ytop = fluidTop(pi), isT = water ? 1 : 0;
   for (let f = 0; f < 6; f++) {
     const ni = pi + FDI[f], nid = PB[ni];
     if (f === 3 && y === 0) continue;
-    if (OPAQUE[nid] || nid === id) continue;
+    if (OPAQUE[nid] || nid === B.ICE) continue;
+    let ylow = 0;
+    if (nid === id) {
+      if (f === 2 || f === 3) continue;
+      if (f < 2 || f > 3) { const nt = fluidTop(ni); if (nt >= ytop - 0.001) continue; ylow = nt; }
+    }
     const fc = FC[f], l0 = PL[ni], sh = FSHADE[f];
     for (let k = 0; k < 4; k++) {
       const cc = fc[k];
-      qp[k * 3] = lx + cc[0]; qp[k * 3 + 1] = y + (cc[1] ? ytop : 0); qp[k * 3 + 2] = lz + cc[2];
-      faceUV(f, cc[0], cc[1] ? ytop : 0, cc[2], k);
+      qp[k * 3] = lx + cc[0]; qp[k * 3 + 1] = y + (cc[1] ? ytop : ylow); qp[k * 3 + 2] = lz + cc[2];
+      faceUV(f, cc[0], cc[1] ? ytop : ylow, cc[2], k);
       qs[k] = (l0 >> 4) / 15; qb[k] = (l0 & 15) / 15; qa[k] = sh;
     }
     emitQuad(isT, TILEOF[(id * 16) * 6 + f], water && (BD[id].tint || 0) ? 0 : 0, false);
@@ -2717,7 +2815,7 @@ let falling = [];
 function seedFrom(str) { if (!str) return Math.floor(Math.random() * 1e9); let h = 7; for (const ch of str) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0; return Math.abs(h) % 1e9 + 1; }
 function resetWorld(seed) {
   for (const c of chunks.values()) freeMesh(c);
-  clearChunks(); edits.clear(); chestData.clear(); SEED = seed; mobs = []; arrows = []; tnts = []; parts = []; falling = []; lastPC = ''; needed = []; R.cloudKey = ''; P.riding = null;
+  clearChunks(); fluidQ.clear(); edits.clear(); chestData.clear(); SEED = seed; mobs = []; arrows = []; tnts = []; parts = []; falling = []; lastPC = ''; needed = []; R.cloudKey = ''; P.riding = null;
 }
 function ensureChunk(cx, cz) {
   const k = ck(cx, cz); let c = chunks.get(k);
@@ -2867,7 +2965,7 @@ function updatePlayer(dt) {
   P.onLadder = false; for (const yy of [P.y + 0.3, P.y + 1.2]) if (getBlock(Math.floor(P.x), Math.floor(yy), Math.floor(P.z)) === B.LADDER) P.onLadder = true;
   let sp = G.fly ? 10 : sprint && f > 0.3 ? 5.8 : 4.3; if ((P.inWater || inLava) && !G.fly) sp = 2.6; if (P.onLadder && !G.fly) sp = 2.2;
   const sy = Math.sin(P.yaw), cy = Math.cos(P.yaw);
-  const tx = (-sy * f + cy * s) * sp, tz = (-cy * f - sy * s) * sp, k = Math.min(1, (P.ground || G.fly ? 14 : 4) * dt);
+  let tx = (-sy * f + cy * s) * sp, tz = (-cy * f - sy * s) * sp; if (P.inWater && !G.fly) { const fl = flowAt(P.x, P.y + 0.3, P.z); tx += fl[0] * 1.8; tz += fl[1] * 1.8; } const k = Math.min(1, (P.ground || G.fly ? 14 : 4) * dt);
   P.vx += (tx - P.vx) * k; P.vz += (tz - P.vz) * k;
   if (G.fly) { P.vy += ((jump ? 8 : down ? -8 : 0) - P.vy) * Math.min(1, 10 * dt); }
   else if (P.onLadder) { P.vy += ((jump ? 3.2 : (down || f < -0.2) ? -3.2 : (f > 0.2 ? 3 : -0.6)) - P.vy) * Math.min(1, 12 * dt); P.fall = 0; }
@@ -3214,7 +3312,7 @@ function frame(now) {
       env = envFor(G.time, P.headWater);
       updatePlayer(dt); updateTarget(); updateMining(dt);
       if (use.bow) use.charge += dt / 1.0;
-      trySpawn(dt, env); updateMobs(dt, env); updateArrows(dt); updateTnt(dt); updateFalling(dt); randomTicks(dt);
+      trySpawn(dt, env); updateMobs(dt, env); updateArrows(dt); updateTnt(dt); updateFalling(dt); randomTicks(dt); fluidTick(dt);
       saveT += dt; if (saveT > 20) { saveT = 0; saveGame(); }
     } else env = envFor(G.time, P.headWater);
     cam = { x: P.x, y: P.y + 1.62, z: P.z, yaw: P.yaw, pitch: P.pitch, fov: (G.fly ? 1.2 : 1.12) };
